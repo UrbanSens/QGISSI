@@ -137,13 +137,19 @@ def add_basemap(ctx: ToolContext, basemap: str, name: str = "") -> ToolResult:
       {"query": {"type": "string", "description": "Place or address, e.g. 'Würzburg Residenz'."},
        "limit": {"type": "integer", "description": "Maximum results (default 5)."},
        "country_codes": {"type": "string", "description": "Optional ISO codes filter, e.g. 'de,at'."},
-       "add_to_map": {"type": "boolean", "description": "Add results as a point layer (default false)."}},
+       "add_to_map": {"type": "boolean", "description": "Add results as a point layer (default false)."},
+       "boundary": {"type": "boolean",
+                    "description": "Also add the outline polygon of the first result (admin areas, parks, "
+                                   "buildings) as a layer, e.g. to measure or clip with it (default false)."}},
       required=["query"], risk=Risk.NETWORK, category="data", untrusted=True)
 def geocode(ctx: ToolContext, query: str, limit: int = 5, country_codes: str = "",
-            add_to_map: bool = False) -> ToolResult:
+            add_to_map: bool = False, boundary: bool = False) -> ToolResult:
     params: Dict[str, Any] = {"q": query, "format": "jsonv2", "limit": max(1, min(int(limit), 20))}
     if country_codes:
         params["countrycodes"] = country_codes
+    if boundary:
+        params["polygon_geojson"] = 1
+        params["polygon_threshold"] = 0.0005
     results = _nominatim("search", params, ctx) or []
     rows = [{"name": r.get("display_name"), "lat": float(r["lat"]), "lon": float(r["lon"]),
              "category": r.get("category") or r.get("class"), "type": r.get("type"),
@@ -164,7 +170,42 @@ def geocode(ctx: ToolContext, query: str, limit: int = 5, country_codes: str = "
         layer.dataProvider().addFeatures(feats)
         layer.updateExtents()
         add_to_project(ctx, layer, layer.name(), created)
-    return ToolResult(data={"query": query, "results": rows or "no match"}, layers_created=created)
+    data: Dict[str, Any] = {"query": query, "results": rows or "no match"}
+    if boundary and results and isinstance(results[0].get("geojson"), dict):
+        shape = results[0]["geojson"]
+        geometry = QgsGeometry.fromWkt(_geojson_to_wkt(shape)) if shape.get("type") != "Point" else None
+        if geometry is not None and not geometry.isEmpty():
+            layer = QgsVectorLayer("MultiPolygon?crs=EPSG:4326&field=name:string(254)&field=osm:string(40)"
+                                   if geometry.type() == 2 else "MultiLineString?crs=EPSG:4326&field=name:string(254)"
+                                   "&field=osm:string(40)", f"Boundary: {query}"[:60], "memory")
+            feature = QgsFeature(layer.fields())
+            feature.setAttributes([rows[0]["name"], rows[0]["osm"]])
+            geometry.convertToMultiType()
+            feature.setGeometry(geometry)
+            layer.dataProvider().addFeatures([feature])
+            layer.updateExtents()
+            add_to_project(ctx, layer, layer.name(), created)
+            box = geometry.boundingBox()
+            data["boundary"] = {"layer": layer.name(), "geometry": shape.get("type"),
+                                "extent_wgs84": [round(box.xMinimum(), 6), round(box.yMinimum(), 6),
+                                                 round(box.xMaximum(), 6), round(box.yMaximum(), 6)]}
+    return ToolResult(data=data, layers_created=created)
+
+
+def _geojson_to_wkt(shape: Dict[str, Any]) -> str:
+    def ring(coords):
+        return "(" + ",".join(f"{x} {y}" for x, y in coords) + ")"
+
+    kind, coords = shape.get("type"), shape.get("coordinates")
+    if kind == "Polygon":
+        return "POLYGON(" + ",".join(ring(r) for r in coords) + ")"
+    if kind == "MultiPolygon":
+        return "MULTIPOLYGON(" + ",".join("(" + ",".join(ring(r) for r in poly) + ")" for poly in coords) + ")"
+    if kind == "LineString":
+        return "LINESTRING" + ring(coords)
+    if kind == "MultiLineString":
+        return "MULTILINESTRING(" + ",".join(ring(r) for r in coords) + ")"
+    return "GEOMETRYCOLLECTION EMPTY"
 
 
 @tool("reverse_geocode", "Address / place name at a WGS84 coordinate (OpenStreetMap Nominatim).",
@@ -380,6 +421,125 @@ def download_osm_data(ctx: ToolContext, tags: List[str], place: str = "", bbox: 
         summary["note"] = "No features found. Check the tags (OSM keys are case-sensitive) and the area."
     summary["license"] = "© OpenStreetMap contributors, ODbL 1.0"
     return ToolResult(data=summary, layers_created=created)
+
+
+# ------------------------------------------------------------------ weather
+OPEN_METEO_ARCHIVE = os.environ.get("QGISSI_OPEN_METEO_URL", "https://archive-api.open-meteo.com/v1/archive")
+WEATHER_VARIABLES = ("temperature_2m_mean", "temperature_2m_max", "temperature_2m_min", "precipitation_sum",
+                     "rain_sum", "snowfall_sum", "wind_speed_10m_max", "et0_fao_evapotranspiration")
+
+
+def _area_points(ctx: ToolContext, layer_ref: str, where: str, max_points: int) -> List[Tuple[float, float]]:
+    from qgis.core import QgsFeatureRequest
+    lyr = resolve_vector(ctx, layer_ref)
+    to_wgs = QgsCoordinateTransform(lyr.crs(), WGS84, ctx.project)
+    request = QgsFeatureRequest().setFilterExpression(where) if where else QgsFeatureRequest()
+    shapes = []
+    for feature in lyr.getFeatures(request):
+        geom = QgsGeometry(feature.geometry())
+        geom.transform(to_wgs)
+        shapes.append(geom)
+    if not shapes:
+        raise ToolError("No features to sample.")
+    area = QgsGeometry.unaryUnion(shapes)
+    box = area.boundingBox()
+    points: List[Tuple[float, float]] = []
+    step = max(0.1, ((box.width() * box.height()) / max_points) ** 0.5)  # ERA5-Land grid is 0.1 degrees
+    y = box.yMinimum() + step / 2
+    while y < box.yMaximum():
+        x = box.xMinimum() + step / 2
+        while x < box.xMaximum():
+            if area.contains(QgsGeometry.fromPointXY(QgsPointXY(x, y))):
+                points.append((round(y, 4), round(x, 4)))
+            x += step
+        y += step
+    if not points:
+        centre = area.centroid().asPoint() if not area.centroid().isEmpty() else box.center()
+        points = [(round(centre.y(), 4), round(centre.x(), 4))]
+    return points[:max_points]
+
+
+@tool("get_weather_history", "Historical daily weather from the ERA5-Land / ERA5 reanalysis (via Open-Meteo, "
+      "no key needed) for a point or averaged over polygon features: temperature (°C), precipitation (mm) and "
+      "more, with period statistics and optional threshold counts. Convert units yourself if needed "
+      "(K = °C + 273.15; m = mm / 1000).",
+      {"lat": {"type": "number", "description": "Latitude (WGS84), for a point."},
+       "lon": {"type": "number", "description": "Longitude (WGS84), for a point."},
+       "area_layer": {"type": "string", "description": "Polygon layer to average over (instead of lat/lon)."},
+       "where": {"type": "string", "description": "Filter for area_layer features."},
+       "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+       "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+       "variables": {"type": "array", "items": {"type": "string", "enum": list(WEATHER_VARIABLES)},
+                     "description": "Daily variables (default temperature_2m_mean, precipitation_sum)."},
+       "model": {"type": "string", "enum": ["era5_land", "era5", "best_match"], "description": "Default era5_land."},
+       "threshold": {"type": "number", "description": "Optional: count days where the first variable exceeds this."},
+       "daily": {"type": "boolean", "description": "Include the daily series (max 400 days)."},
+       "max_points": {"type": "integer", "description": "Max sample points for areas (default 25)."}},
+      required=["start_date", "end_date"], risk=Risk.NETWORK, category="data", untrusted=True)
+def get_weather_history(ctx: ToolContext, start_date: str, end_date: str, lat: Optional[float] = None,
+                        lon: Optional[float] = None, area_layer: str = "", where: str = "",
+                        variables: Optional[List[str]] = None, model: str = "era5_land",
+                        threshold: Optional[float] = None, daily: bool = False, max_points: int = 25) -> Dict[str, Any]:
+    if not ctx.allow_network:
+        raise ToolError("Network access is disabled in the settings.")
+    names = variables or ["temperature_2m_mean", "precipitation_sum"]
+    if area_layer:
+        points = _area_points(ctx, area_layer, where, max(1, min(int(max_points), 60)))
+    elif lat is not None and lon is not None:
+        points = [(float(lat), float(lon))]
+    else:
+        raise ToolError("Give lat and lon, or an area_layer.")
+    def fetch(variable_names: List[str], model_name: str) -> List[Dict[str, Any]]:
+        params = {"latitude": ",".join(str(p[0]) for p in points), "longitude": ",".join(str(p[1]) for p in points),
+                  "start_date": start_date, "end_date": end_date, "daily": ",".join(variable_names), "timezone": "GMT"}
+        if model_name != "best_match":
+            params["models"] = model_name
+        try:
+            reply = _http.get_json(f"{OPEN_METEO_ARCHIVE}?{urllib.parse.urlencode(params)}", {}, ctx.cancel)
+        except HttpError as exc:
+            raise ToolError(f"Open-Meteo error: {exc.error_text()[:300]}")
+        found = reply if isinstance(reply, list) else [reply]
+        if any(isinstance(loc, dict) and loc.get("error") for loc in found):
+            raise ToolError(f"Open-Meteo error: {found[0].get('reason')}")
+        return found
+
+    def average(found: List[Dict[str, Any]], name: str, count: int) -> List[Optional[float]]:
+        per_day = []
+        for i in range(count):
+            values = [loc["daily"][name][i] for loc in found if loc["daily"].get(name) and loc["daily"][name][i] is not None]
+            per_day.append(round(sum(values) / len(values), 3) if values else None)
+        return per_day
+
+    locations = fetch(names, model)
+    days = locations[0]["daily"]["time"]
+    series: Dict[str, List[Optional[float]]] = {name: average(locations, name, len(days)) for name in names}
+    units = dict(locations[0].get("daily_units", {}))
+    sources = {name: model for name in names}
+    missing = [name for name, values in series.items() if all(v is None for v in values)]
+    if missing and model == "era5_land":  # e.g. precipitation is not served for ERA5-Land
+        backup = fetch(missing, "era5")
+        units.update(backup[0].get("daily_units", {}))
+        for name in missing:
+            series[name] = average(backup, name, len(days))
+            sources[name] = "era5 (not available from era5_land)"
+    stats: Dict[str, Any] = {}
+    for name, values in series.items():
+        present = [v for v in values if v is not None]
+        if present:
+            stats[name] = {"unit": units.get(name), "mean": round(sum(present) / len(present), 3),
+                           "min": min(present), "max": max(present), "sum": round(sum(present), 3),
+                           "days": len(present), "model": sources[name]}
+        else:
+            stats[name] = {"unit": units.get(name), "note": "no data for this period/location"}
+    out: Dict[str, Any] = {"model": model, "period": [start_date, end_date], "points_sampled": len(points),
+                           "statistics": stats, "source": "Open-Meteo archive API, ERA5 / ERA5-Land (Copernicus)"}
+    if threshold is not None and names:
+        first = [v for v in series[names[0]] if v is not None]
+        out["days_above_threshold"] = {"variable": names[0], "threshold": threshold,
+                                       "days": sum(1 for v in first if v > float(threshold))}
+    if daily and len(days) <= 400:
+        out["daily"] = {"date": days, **series}
+    return out
 
 
 # ------------------------------------------------------------------ creation
