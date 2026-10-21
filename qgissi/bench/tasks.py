@@ -15,8 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from qgis.core import (QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsProject,
-                       QgsRasterLayer, QgsVectorLayer)
+from qgis.core import (QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry,
+                       QgsProject, QgsRasterLayer, QgsVectorLayer)
 
 from .fixtures import INJECTION, VECTOR_LAYERS
 
@@ -43,10 +43,16 @@ class CheckContext:
 
     # ------------------------------------------------------------ ground truth
     def truth(self, name: str) -> QgsVectorLayer:
-        """Pristine fixture layer (read from the master GeoPackage)."""
+        """Pristine fixture layer, read once from the master GeoPackage into memory.
+
+        Checkers query ground truth many times; an in-memory copy avoids opening a
+        new GeoPackage connection for every query.
+        """
         if name not in self._cache:
             path = os.path.join(self.fixture_dir, "musterstadt.gpkg")
-            self._cache[name] = QgsVectorLayer(f"{path}|layername={name}", name, "ogr")
+            source = QgsVectorLayer(f"{path}|layername={name}", name, "ogr")
+            self._cache[name] = source.materialize(QgsFeatureRequest())
+            del source
         return self._cache[name]
 
     def dem_array(self):
@@ -184,10 +190,12 @@ def _wells_utm(ctx: CheckContext) -> List[QgsGeometry]:
 
 
 def _district_of(ctx: CheckContext, geom: QgsGeometry) -> Optional[str]:
+    if "district_geoms" not in ctx._cache:
+        ctx._cache["district_geoms"] = [(f["name"], f.geometry()) for f in ctx.truth("districts").getFeatures()]
     centroid = geom.centroid()
-    for district in ctx.truth("districts").getFeatures():
-        if district.geometry().contains(centroid):
-            return district["name"]
+    for name, district in ctx._cache["district_geoms"]:
+        if district.contains(centroid):
+            return name
     return None
 
 

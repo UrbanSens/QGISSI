@@ -76,20 +76,18 @@ def load_fixture_project(project: QgsProject, data_dir: str) -> Dict[str, str]:
     project.setTitle("Musterstadt")
     gpkg = os.path.join(data_dir, "musterstadt.gpkg")
     ids: Dict[str, str] = {}
-    for name in LOAD_ORDER:
+    root = project.layerTreeRoot()
+    for index, name in enumerate(LOAD_ORDER):  # top of the layer tree first
         layer = QgsVectorLayer(f"{gpkg}|layername={name}", name, "ogr")
         if not layer.isValid():
             raise RuntimeError(f"Fixture layer {name} failed to load")
-        project.addMapLayer(layer)
+        project.addMapLayer(layer, False)
+        root.insertLayer(index, layer)
         ids[name] = layer.id()
     dem = QgsRasterLayer(os.path.join(data_dir, "dem.tif"), "dem", "gdal")
     project.addMapLayer(dem, False)
-    project.layerTreeRoot().insertLayer(len(project.layerTreeRoot().children()), dem)
+    root.insertLayer(len(LOAD_ORDER), dem)
     ids["dem"] = dem.id()
-    # layer tree order: first added ends up at the bottom, so reverse to keep points on top
-    root = project.layerTreeRoot()
-    order = [root.findLayer(ids[name]) for name in LOAD_ORDER] + [root.findLayer(ids["dem"])]
-    root.reorderGroupLayers([node.layer() for node in order if node is not None])
     return ids
 
 
