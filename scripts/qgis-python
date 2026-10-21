@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run Python with the interpreter and libraries bundled with QGIS, with this
+# repository on the path. Usage: scripts/qgis-python -m qgissi.bench run ...
+set -euo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -n "${QGIS_PYTHON:-}" ]]; then
+  PY="$QGIS_PYTHON"
+elif [[ "$(uname)" == "Darwin" ]]; then
+  APP="${QGIS_APP:-$(ls -d /Applications/QGIS*.app 2>/dev/null | sort | tail -1)}"
+  [[ -d "$APP" ]] || { echo "QGIS.app not found; set QGIS_APP=/path/to/QGIS.app" >&2; exit 1; }
+  export QGIS_PREFIX_PATH="$APP/Contents/MacOS"
+  export PYTHONPATH="$APP/Contents/Resources/python:$APP/Contents/Resources/python/plugins:${PYTHONPATH:-}"
+  PY="$QGIS_PREFIX_PATH/bin/python3"
+else
+  export QGIS_PREFIX_PATH="${QGIS_PREFIX_PATH:-/usr}"
+  export PYTHONPATH="$QGIS_PREFIX_PATH/share/qgis/python:$QGIS_PREFIX_PATH/share/qgis/python/plugins:${PYTHONPATH:-}"
+  PY="${PYTHON:-python3}"
+fi
+export PYTHONPATH="$REPO:$PYTHONPATH"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
+exec "$PY" "$@"
