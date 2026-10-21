@@ -65,7 +65,7 @@ def _nominatim(path: str, params: Dict[str, Any], ctx: ToolContext) -> Any:
        "x_field": {"type": "string", "description": "CSV longitude/easting column."},
        "y_field": {"type": "string", "description": "CSV latitude/northing column."},
        "crs": {"type": "string", "description": "CRS of CSV coordinates (default EPSG:4326)."}},
-      required=["source"], risk=Risk.WRITE, category="data")
+      required=["source"], risk=Risk.WRITE, category="data", untrusted=True)
 def load_layer(ctx: ToolContext, source: str, name: str = "", kind: str = "auto", sublayer: str = "",
                x_field: str = "", y_field: str = "", crs: str = "EPSG:4326") -> ToolResult:
     source = os.path.expanduser(source.strip())
@@ -138,7 +138,7 @@ def add_basemap(ctx: ToolContext, basemap: str, name: str = "") -> ToolResult:
        "limit": {"type": "integer", "description": "Maximum results (default 5)."},
        "country_codes": {"type": "string", "description": "Optional ISO codes filter, e.g. 'de,at'."},
        "add_to_map": {"type": "boolean", "description": "Add results as a point layer (default false)."}},
-      required=["query"], risk=Risk.NETWORK, category="data")
+      required=["query"], risk=Risk.NETWORK, category="data", untrusted=True)
 def geocode(ctx: ToolContext, query: str, limit: int = 5, country_codes: str = "",
             add_to_map: bool = False) -> ToolResult:
     params: Dict[str, Any] = {"q": query, "format": "jsonv2", "limit": max(1, min(int(limit), 20))}
@@ -169,7 +169,7 @@ def geocode(ctx: ToolContext, query: str, limit: int = 5, country_codes: str = "
 
 @tool("reverse_geocode", "Address / place name at a WGS84 coordinate (OpenStreetMap Nominatim).",
       {"lat": {"type": "number"}, "lon": {"type": "number"}},
-      required=["lat", "lon"], risk=Risk.NETWORK, category="data", tier="extended")
+      required=["lat", "lon"], risk=Risk.NETWORK, category="data", tier="extended", untrusted=True)
 def reverse_geocode(ctx: ToolContext, lat: float, lon: float) -> Dict[str, Any]:
     result = _nominatim("reverse", {"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 18}, ctx) or {}
     if result.get("error"):
@@ -301,7 +301,7 @@ def _resolve_area(ctx: ToolContext, place: str, bbox: Optional[List[float]], lay
        "extent_layer": {"type": "string", "description": "Use this layer's extent as the area."},
        "name": {"type": "string", "description": "Base name for the new layers."},
        "max_features": {"type": "integer", "description": "Cap on downloaded elements (default 20000)."}},
-      required=["tags"], risk=Risk.NETWORK, category="data")
+      required=["tags"], risk=Risk.NETWORK, category="data", untrusted=True)
 def download_osm_data(ctx: ToolContext, tags: List[str], place: str = "", bbox: Optional[List[float]] = None,
                       extent_layer: str = "", name: str = "", max_features: int = 20000) -> ToolResult:
     if not ctx.allow_network:

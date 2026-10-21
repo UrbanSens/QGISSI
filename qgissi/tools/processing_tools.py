@@ -9,7 +9,7 @@ from qgis.core import (QgsApplication, QgsMapLayer, QgsProcessingAlgorithm, QgsP
                        QgsProcessingException, QgsProcessingFeedback, QgsProcessingParameterDefinition,
                        QgsRasterLayer, QgsVectorLayer)
 
-from ._qgis import add_to_project, json_value, resolve_layer
+from ._qgis import add_to_project, json_value, parse_crs, resolve_layer
 from .registry import Risk, ToolContext, ToolError, ToolResult, tool
 
 LAYER_TYPES = {"source", "vector", "raster", "layer", "mesh", "pointcloud", "annotation", "vectortile"}
@@ -216,12 +216,19 @@ def _prepare(ctx: ToolContext, alg, parameters: Dict[str, Any], allow_geographic
         if name is None:
             raise ToolError(f"'{alg.id()}' has no parameter '{key}'. Parameters: {', '.join(definitions)}.")
         prepared[name] = value
+    destinations = [p for p in definitions.values() if p.type() in DESTINATION_TYPES and p.type() != "folderDestination"]
+    primary = next((p.name() for p in destinations if p.name() == "OUTPUT"), destinations[0].name() if destinations else None)
     for name, param in definitions.items():
         ptype = param.type()
         value = prepared.get(name)
         if value is None:
-            if ptype in DESTINATION_TYPES and not _is_optional(param) and ptype != "folderDestination":
+            # Some algorithms declare their main output optional (e.g. native:joinattributestable);
+            # always produce the primary output so the result can be inspected.
+            if ptype in DESTINATION_TYPES and ptype != "folderDestination" and (not _is_optional(param) or name == primary):
                 prepared[name] = "TEMPORARY_OUTPUT"
+            continue
+        if ptype == "crs" and isinstance(value, str):
+            prepared[name] = parse_crs(value)
             continue
         if ptype in LAYER_TYPES:
             prepared[name] = _resolve_layer_value(ctx, value)

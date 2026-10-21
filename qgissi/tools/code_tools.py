@@ -159,7 +159,7 @@ def _namespace(ctx: ToolContext, created: List[str]) -> Dict[str, Any]:
       {"code": {"type": "string", "description": "Python source."},
        "purpose": {"type": "string", "description": "One sentence: what the code does (shown to the user)."},
        "timeout_s": {"type": "integer", "description": f"Time limit (default {int(DEFAULT_TIMEOUT)}, max 600)."}},
-      required=["code", "purpose"], risk=Risk.CODE, category="code")
+      required=["code", "purpose"], risk=Risk.CODE, category="code", untrusted=True)
 def run_pyqgis(ctx: ToolContext, code: str, purpose: str, timeout_s: int = int(DEFAULT_TIMEOUT)) -> ToolResult:
     report = check_code(code)
     if not report.ok:

@@ -193,3 +193,19 @@ def rect_list(rect: QgsRectangle, digits: int = 6) -> List[float]:
 
 def summarize(rows: List[Dict[str, Any]], limit: int) -> Dict[str, Any]:
     return {"returned": len(rows[:limit]), "rows": rows[:limit]}
+
+
+def band_stats(provider, band: int, extent, sample_size: int = 250_000):
+    """Sampled band statistics.
+
+    QGIS 3.36's bindings flag every explicit bandStatistics() overload as
+    deprecated, even the flags-based replacement, so the warning is silenced
+    here instead of dropping the sampling (which keeps large rasters fast).
+    """
+    import warnings
+    from qgis.core import QgsRasterBandStats
+    flags_type = getattr(Qgis, "RasterBandStatistics", None)
+    stats = flags_type(Qgis.RasterBandStatistic.All) if flags_type is not None else QgsRasterBandStats.All
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return provider.bandStatistics(band, stats, extent, sample_size)

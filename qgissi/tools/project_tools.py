@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from qgis.core import QgsRasterBandStats, QgsRasterLayer, QgsUnitTypes, QgsVectorLayer, QgsWkbTypes
+from qgis.core import QgsRasterLayer, QgsUnitTypes, QgsVectorLayer, QgsWkbTypes
 
 from ..core.context import crs_label, ordered_layers
-from ._qgis import json_value, parse_crs, rect_list, resolve_layer, to_wgs84_extent
+from ._qgis import band_stats, json_value, parse_crs, rect_list, resolve_layer, to_wgs84_extent
 from .registry import Risk, ToolContext, ToolError, ToolResult, tool
 
 
@@ -39,7 +39,7 @@ def list_layers(ctx: ToolContext, include_fields: bool = False) -> Dict[str, Any
       "(raster). Call this before using a layer's fields or CRS for the first time.",
       {"layer": {"type": "string", "description": "Layer name or id."},
        "sample_size": {"type": "integer", "description": "Sample features to include (0-20, default 3)."}},
-      required=["layer"], category="project")
+      required=["layer"], category="project", untrusted=True)
 def describe_layer(ctx: ToolContext, layer: str, sample_size: int = 3) -> Dict[str, Any]:
     lyr = resolve_layer(ctx, layer)
     crs = lyr.crs()
@@ -72,7 +72,7 @@ def describe_layer(ctx: ToolContext, layer: str, sample_size: int = 3) -> Dict[s
                                      "data_type": int(provider.dataType(band)),
                                      "nodata": provider.sourceNoDataValue(band) if provider.sourceHasNoDataValue(band) else None}
             if band <= 4:
-                stats = provider.bandStatistics(band, QgsRasterBandStats.All, lyr.extent(), 250_000)
+                stats = band_stats(provider, band, lyr.extent())
                 entry.update(min=round(stats.minimumValue, 6), max=round(stats.maximumValue, 6),
                              mean=round(stats.mean, 6), stddev=round(stats.stdDev, 6))
             bands.append(entry)
@@ -188,3 +188,18 @@ def ask_user(ctx: ToolContext, question: str, options: Optional[List[str]] = Non
     if not answer:
         raise ToolError("The user did not answer. Proceed with a reasonable assumption and state it.")
     return ToolResult(text=f"User answered: {answer}")
+
+
+@tool("save_project", "Save the QGIS project (to its current file, or to a new .qgz path).",
+      {"path": {"type": "string", "description": "Optional new file path (.qgz/.qgs)."}},
+      risk=Risk.WRITE, category="project")
+def save_project(ctx: ToolContext, path: str = "") -> str:
+    import os
+    target = os.path.expanduser(path) if path else ctx.project.fileName()
+    if not target:
+        raise ToolError("The project has never been saved; give a path, e.g. analysis.qgz.")
+    if path and not os.path.isabs(target) and ctx.output_dir:
+        target = os.path.join(ctx.output_dir, target)
+    if not ctx.project.write(target):
+        raise ToolError(f"Could not save the project to {target}.")
+    return f"Project saved to {target}."

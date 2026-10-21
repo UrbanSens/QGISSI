@@ -7,13 +7,13 @@ from qgis.core import (QgsCategorizedSymbolRenderer, QgsClassificationEqualInter
                        QgsClassificationPrettyBreaks, QgsClassificationQuantile,
                        QgsClassificationStandardDeviation, QgsColorRampShader, QgsContrastEnhancement,
                        QgsExpression, QgsGradientColorRamp, QgsGraduatedSymbolRenderer, QgsHeatmapRenderer,
-                       QgsHillshadeRenderer, QgsMultiBandColorRenderer, QgsPalLayerSettings, QgsRasterBandStats,
+                       QgsHillshadeRenderer, QgsMultiBandColorRenderer, QgsPalLayerSettings,
                        QgsRasterShader, QgsRendererCategory, QgsSingleBandGrayRenderer,
                        QgsSingleBandPseudoColorRenderer, QgsSingleSymbolRenderer, QgsStyle, QgsSymbol,
                        QgsTextBufferSettings, QgsTextFormat, QgsVectorLayer, QgsVectorLayerSimpleLabeling)
 from qgis.PyQt.QtGui import QColor
 
-from ._qgis import geometry_kind, json_value, resolve_layer, resolve_raster, resolve_vector
+from ._qgis import band_stats, geometry_kind, json_value, resolve_layer, resolve_raster, resolve_vector
 from .registry import Risk, ToolContext, ToolError, tool
 
 RAMP_HINT = ("QGIS colour ramp name such as Viridis, Magma, Spectral, RdYlGn, Blues, Greens, Reds, YlOrRd, "
@@ -224,7 +224,7 @@ def set_raster_style(ctx: ToolContext, layer: str, style: str, band: int = 1, co
     provider = lyr.dataProvider()
     if band < 1 or band > lyr.bandCount():
         raise ToolError(f"Band {band} does not exist (layer has {lyr.bandCount()}).")
-    stats = provider.bandStatistics(band, QgsRasterBandStats.Min | QgsRasterBandStats.Max, lyr.extent(), 250_000)
+    stats = band_stats(provider, band, lyr.extent())
     lo = stats.minimumValue if min_value is None else float(min_value)
     hi = stats.maximumValue if max_value is None else float(max_value)
     if style == "pseudocolor":

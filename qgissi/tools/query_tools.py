@@ -50,7 +50,7 @@ def _check_expression_errors(layer: QgsVectorLayer, where: Optional[str]) -> Non
        "geometry": {"type": "string", "enum": ["none", "wkt", "centroid", "bbox"],
                     "description": "Geometry representation (default none). WKT is truncated for large shapes."},
        "selected_only": {"type": "boolean", "description": "Only selected features."}},
-      required=["layer"], category="query")
+      required=["layer"], category="query", untrusted=True)
 def get_features(ctx: ToolContext, layer: str, where: str = "", fields: Optional[List[str]] = None, limit: int = 20,
                  order_by: str = "", descending: bool = False, geometry: str = "none",
                  selected_only: bool = False) -> Dict[str, Any]:
@@ -111,7 +111,7 @@ def count_features(ctx: ToolContext, layer: str, where: str = "", selected_only:
        "field": {"type": "string", "description": "Field name or QGIS expression, e.g. \"population\" or $area."},
        "where": {"type": "string", "description": "Optional QGIS expression filter."},
        "group_by": {"type": "string", "description": "Optional field to group by (max 50 groups returned)."}},
-      required=["layer", "field"], category="query")
+      required=["layer", "field"], category="query", untrusted=True)
 def field_statistics(ctx: ToolContext, layer: str, field: str, where: str = "",
                      group_by: str = "") -> Dict[str, Any]:
     lyr = resolve_vector(ctx, layer)
@@ -171,7 +171,7 @@ def _summary(values: List[Any]) -> Dict[str, Any]:
        "field": {"type": "string", "description": "Field name."},
        "where": {"type": "string", "description": "Optional QGIS expression filter."},
        "limit": {"type": "integer", "description": "Maximum distinct values to return (default 50)."}},
-      required=["layer", "field"], category="query")
+      required=["layer", "field"], category="query", untrusted=True)
 def unique_values(ctx: ToolContext, layer: str, field: str, where: str = "", limit: int = 50) -> Dict[str, Any]:
     lyr = resolve_vector(ctx, layer)
     name = require_field(lyr, field)
@@ -220,7 +220,7 @@ def select_features(ctx: ToolContext, layer: str, where: str = "", mode: str = "
       {"expression": {"type": "string", "description": "QGIS expression."},
        "layer": {"type": "string", "description": "Optional layer to evaluate against, per feature."},
        "where": {"type": "string", "description": "Optional filter when a layer is given."}},
-      required=["expression"], category="query")
+      required=["expression"], category="query", untrusted=True)
 def evaluate_expression(ctx: ToolContext, expression: str, layer: str = "", where: str = "") -> Dict[str, Any]:
     expr = QgsExpression(expression)
     if expr.hasParserError():
@@ -326,3 +326,74 @@ def geodesic_distance(ctx: ToolContext, from_point: List[float], to_point: List[
     metres = calculator.measureLine(a, b)
     return {"distance_m": round(metres, 3), "distance_km": round(metres / 1000, 6)}
 
+
+
+@tool("sample_raster", "Read raster values at points: given coordinates, or at the features of a point layer "
+      "(optionally filtered). Uses the value of the cell containing each point.",
+      {"layer": {"type": "string", "description": "Raster layer name or id."},
+       "points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
+                  "description": "[[x, y], ...] coordinates."},
+       "points_crs": {"type": "string", "description": "CRS of points (default: raster CRS)."},
+       "point_layer": {"type": "string", "description": "Alternatively, a point layer to sample at."},
+       "where": {"type": "string", "description": "Filter for point_layer."},
+       "label_field": {"type": "string", "description": "Field of point_layer used to label values."},
+       "band": {"type": "integer", "description": "Band number (default 1)."}},
+      required=["layer"], category="query")
+def sample_raster(ctx: ToolContext, layer: str, points: Optional[List[List[float]]] = None, points_crs: str = "",
+                  point_layer: str = "", where: str = "", label_field: str = "", band: int = 1) -> Dict[str, Any]:
+    from ._qgis import resolve_raster
+    raster = resolve_raster(ctx, layer)
+    provider = raster.dataProvider()
+    samples: List[Dict[str, Any]] = []
+
+    def sample(point: QgsPointXY) -> Any:
+        value, ok = provider.sample(point, int(band))
+        return round(value, 6) if ok and value == value else None
+
+    if point_layer:
+        source = resolve_vector(ctx, point_layer)
+        transform = QgsCoordinateTransform(source.crs(), raster.crs(), ctx.project)
+        label = require_field(source, label_field) if label_field else None
+        for feature in source.getFeatures(_request(source, where, False)):
+            geom = feature.geometry()
+            if geom is None or geom.isNull():
+                continue
+            point = transform.transform(geom.centroid().asPoint())
+            samples.append({"fid": feature.id(), **({"label": json_value(feature[label])} if label else {}),
+                            "value": sample(point)})
+            if len(samples) >= 500:
+                break
+    else:
+        if not points:
+            raise ToolError("Give points or a point_layer.")
+        transform = (QgsCoordinateTransform(parse_crs(points_crs), raster.crs(), ctx.project)
+                     if points_crs else None)
+        for pair in points[:500]:
+            point = QgsPointXY(float(pair[0]), float(pair[1]))
+            if transform is not None:
+                point = transform.transform(point)
+            samples.append({"point": [pair[0], pair[1]], "value": sample(point)})
+    return {"raster": raster.name(), "band": band, "samples": samples}
+
+
+@tool("check_geometry_validity", "Count invalid, empty and null geometries in a vector layer and list the first "
+      "problems. Fix with run_processing_algorithm('native:fixgeometries').",
+      {"layer": {"type": "string"}, "where": {"type": "string", "description": "Optional filter."}},
+      required=["layer"], category="query", tier="extended")
+def check_geometry_validity(ctx: ToolContext, layer: str, where: str = "") -> Dict[str, Any]:
+    lyr = resolve_vector(ctx, layer)
+    invalid, empty, null, problems = 0, 0, 0, []
+    for feature in lyr.getFeatures(_request(lyr, where, False)):
+        geom = feature.geometry()
+        if geom is None or geom.isNull():
+            null += 1
+            continue
+        if geom.isEmpty():
+            empty += 1
+            continue
+        if not geom.isGeosValid():
+            invalid += 1
+            if len(problems) < 10:
+                errors = geom.validateGeometry()
+                problems.append({"fid": feature.id(), "error": errors[0].what() if errors else "invalid"})
+    return {"layer": lyr.name(), "invalid": invalid, "empty": empty, "null": null, "examples": problems}

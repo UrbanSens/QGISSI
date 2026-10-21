@@ -86,6 +86,13 @@ class ToolDef:
     category: str = "general"
     tier: str = "core"
     requires_gui: bool = False
+    untrusted: bool = False      # output may contain third-party text (prompt-injection surface)
+
+    def annotations(self) -> Dict[str, Any]:
+        """MCP-style behaviour hints derived from the risk level."""
+        return {"readOnlyHint": self.risk == Risk.READ,
+                "destructiveHint": self.risk in (Risk.DESTRUCTIVE, Risk.CODE),
+                "openWorldHint": self.risk == Risk.NETWORK or self.untrusted}
 
     def input_schema(self) -> Dict[str, Any]:
         return {"type": "object", "properties": self.parameters, "required": list(self.required),
@@ -107,11 +114,11 @@ class ToolRegistry:
 
     def tool(self, name: str, description: str, parameters: Optional[Dict[str, Any]] = None,
              required: Optional[List[str]] = None, risk: str = Risk.READ, category: str = "general",
-             tier: str = "core", requires_gui: bool = False):
+             tier: str = "core", requires_gui: bool = False, untrusted: bool = False):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.add(ToolDef(name=name, description=" ".join(description.split()), func=func,
                              parameters=parameters or {}, required=required or [], risk=risk,
-                             category=category, tier=tier, requires_gui=requires_gui))
+                             category=category, tier=tier, requires_gui=requires_gui, untrusted=untrusted))
             return func
         return decorator
 
