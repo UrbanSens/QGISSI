@@ -25,6 +25,22 @@ from typing import List
 DEFAULT_CACHE = os.environ.get("QGISSI_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "qgissi"))
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Read KEY=VALUE lines (e.g. ANTHROPIC_API_KEY) from a git-ignored .env file, without overriding the
+    environment."""
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):]
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
 def _git_sha() -> str:
     try:
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -211,6 +227,7 @@ def main(argv=None) -> int:
         p.set_defaults(func=func, network=True)
 
     args = parser.parse_args(argv)
+    load_dotenv()
     return args.func(args)
 
 
