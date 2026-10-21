@@ -49,6 +49,7 @@ The development of QGISSI 0.1.0 (21 October 2026), recorded in order.
 | QGIS 4.2 CI | Benchmark CLI segfaulted during interpreter teardown after finishing | Clean `exitQgis()` and `os._exit()` |
 | Repeated test runs | `reorderGroupLayers()` segfaulted intermittently (2 of 5 runs) | Insert layers at explicit tree positions (8/8 runs clean) |
 | Repeated test runs | Checkers opened a GeoPackage connection per query, and SpatiaLite's log volume got the process throttled by macOS | Read ground truth into memory once |
+| Long local-model run (stalled at task 18) | Every GeoPackage open initialises SpatiaLite, whose SQLite warnings macOS's system SQLite sends to the unified log; after a few hundred opens macOS throttled the process | Fixture layers are read once per process; each task gets in-memory copies (240 oracle runs in 16 s) |
 | GUI probe | Headless runs wrote settings into a QGIS profile folder outside the project | Isolated profile via `QGIS_CUSTOM_CONFIG_PATH` (the constructor's `profileFolder` argument is ignored) |
 | Live API check | Open-Meteo returns no precipitation for ERA5-Land | Per-variable fallback to ERA5, with provenance in the result |
 | Local-model baseline | Mistral produced an unbounded generation (958 s for one task) | Cap Ollama output (`num_predict`) |
