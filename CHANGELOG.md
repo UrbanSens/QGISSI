@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **First Claude results**: Opus 5.5, Sonnet 5.5 and Haiku 5.5 each solved all 30 QGISSI-Bench tasks at
+  medium effort. The pass cost $1.77 (see [docs/BENCHMARKS.md](docs/BENCHMARKS.md)).
+- **Google suites**: `--resume` and `--budget` for GeoKTools and GeoExpertQueries. Models run interleaved
+  per query, and judge costs are recorded and reported.
+- **Cost estimate**: `--dry-run` is recalibrated on the measured runs; it was about 12 times too high.
+- **Nominatim**: the one-request-per-second limit now holds across processes (POSIX).
+- **Docs**: the code tripwire's blind spot for native code (GDAL `/vsicurl/`, Qt) is documented.
+- **Quality**: 107 unit tests.
+
 ## 0.1.0 (2026-10-21)
 
 First release.

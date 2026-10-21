@@ -108,7 +108,7 @@ results are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 ## Development
 
 ```bash
-python3 -m pytest tests/unit                  # 103 tests, no QGIS needed
+python3 -m pytest tests/unit                  # 106 tests, no QGIS needed
 scripts/qgis-python -m pytest tests/qgis      # 53 tests in headless QGIS: tools, GUI, MCP, undo, all 30 checkers
 python3 scripts/package.py                    # dist/qgissi-<version>.zip
 ```

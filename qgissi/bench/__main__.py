@@ -75,7 +75,10 @@ def _write_meta(out_dir: str, args, suite: str, task_count: int) -> None:
 def _estimate(models: List[str], n_tasks: int) -> None:
     from ..providers import parse_model_spec
     from ..providers.catalog import model_info
-    print("Rough cost estimate (assumes ~7 steps/task, ~11k-token cached prefix, ~2.5k output tokens/step):")
+    # Calibrated on the 2026-10-21 Claude 5.5 runs at medium effort (3.3 steps, ~690 output and ~50k cache-read
+    # tokens per task, list prices) with ~20% headroom; higher effort levels write more thinking tokens.
+    print("Rough cost estimate at medium effort (~4 steps/task; per step ~12.5k cached tokens read, ~750 written "
+          "and ~250 output tokens; one ~15k-token prefix write):")
     for spec in models:
         if spec == "oracle":
             print(f"  {spec:<40} $0 (scripted)")
@@ -85,10 +88,11 @@ def _estimate(models: List[str], n_tasks: int) -> None:
         if info.price is None:
             print(f"  {spec:<40} price unknown")
             continue
-        inp, out, write, read = info.price
-        steps = 7
-        per_task = (11_000 * write + steps * 11_000 * read + steps * 2_000 * inp + steps * 2_500 * out) / 1e6
-        print(f"  {spec:<40} ~${per_task:.3f}/task -> ~${per_task * n_tasks:.2f} for {n_tasks} tasks")
+        _inp, out, write, read = info.price
+        steps = 4
+        per_task = steps * (12_500 * read + 750 * write + 250 * out) / 1e6
+        total = per_task * n_tasks + 15_000 * write / 1e6
+        print(f"  {spec:<40} ~${per_task:.3f}/task -> ~${total:.2f} for {n_tasks} tasks")
 
 
 def _bench_args(parser: argparse.ArgumentParser) -> None:
@@ -221,6 +225,11 @@ def main(argv=None) -> int:
         p.add_argument("--ids", default="", help="Comma-separated query ids")
         p.add_argument("--accept-terms", action="store_true", help="Acknowledge the benchmark data terms")
         p.add_argument("--official-python", default="", help="Python >= 3.10 to also run Google's official runners")
+        p.add_argument("--resume", action="store_true",
+                       help="Continue an interrupted run in --out: skip model/case runs already recorded")
+        p.add_argument("--budget", type=float, default=0.0,
+                       help="Stop starting new cases once the cost recorded in --out reaches this many USD, "
+                            "judge calls included (0 = no limit)")
         if name == "geoktools":
             p.add_argument("--subset", choices=["all", "open"], default="all",
                            help="'open' = the 36 cases answerable from open data (unofficial diagnostic)")

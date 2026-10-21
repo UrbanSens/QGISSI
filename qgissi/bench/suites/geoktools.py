@@ -6,12 +6,14 @@ predictions too (that interpreter needs numpy and rouge-score).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from typing import Any, Dict, List
 
 from ..scoring import bootstrap_ci, extract_answer_list, mean, score_structured_answer
 from .georeason import fetch, load_cases
+from .rows import append_row, load_rows, open_rows, row_cost
 
 # Templates whose answers can be reproduced from open data (unofficial diagnostic,
 # see docs/BENCHMARKS.md); the rest depend on Google Maps POIs or a gated API.
@@ -53,46 +55,73 @@ def run_geoktools(args) -> int:
         return 0
     out_dir = args.out or os.path.join("bench_runs", "geoktools")
     os.makedirs(out_dir, exist_ok=True)
-    summaries: Dict[str, Any] = {}
-    for spec in models:
-        target = make_target(spec, allow_fallback=args.allow_fallback)
-        rows: List[Dict[str, Any]] = []
-        predictions_path = os.path.join(out_dir, f"predictions_{target.slug}.jsonl")
-        with open(predictions_path, "w", encoding="utf-8") as preds:
-            for i, case in enumerate(cases, 1):
+    targets = {spec: make_target(spec, allow_fallback=args.allow_fallback) for spec in models}
+    paths = {spec: os.path.join(out_dir, f"rows_{t.slug}.jsonl") for spec, t in targets.items()}
+    done = {spec: load_rows(paths[spec]) if args.resume else {} for spec in models}
+    spent = sum(row_cost(r) for rows in done.values() for r in rows.values())
+    stopped = False
+    with contextlib.ExitStack() as stack:
+        files = {spec: stack.enter_context(open_rows(paths[spec], args.resume)) for spec in models}
+        for i, case in enumerate(cases, 1):
+            # interleaved, so every model meets the web services in the same state
+            for spec, target in targets.items():
+                if case["query_id"] in done[spec]:
+                    continue
+                if args.budget and spent >= args.budget:
+                    stopped = True
+                    break
                 work_dir = os.path.join(out_dir, "runs", target.slug, case["query_id"])
                 run, _session = run_query(target, case["query"], args, work_dir)
                 response, extracted = extract_answer_list(run.final_text, case["query"].count("__"))
                 answer = response if response is not None else (run.final_text or "")
                 score = score_structured_answer(case["golden_answer_raw"], answer)  # golds are read only here
-                preds.write(json.dumps({"query_id": case["query_id"], "response": answer}, ensure_ascii=False) + "\n")
                 row = {"query_id": case["query_id"], "k_level": case["k_level"], "template_id": case["template_id"],
-                       "score": round(score, 4), "extracted": extracted, **run_record(run)}
-                rows.append(row)
+                       "score": round(score, 4), "extracted": extracted, "response": answer, **run_record(run)}
+                append_row(files[spec], row)
+                done[spec][case["query_id"]] = row
+                spent += row_cost(row)
                 print(f"[{i}/{len(cases)}] {spec:<36} {case['query_id']}  K={case['k_level']}  score={score:.2f}  "
-                      f"{row['status']}  ${row['cost_usd'] or 0:.4f}  {row['wall_s']:.0f}s")
+                      f"{row['status']}  ${row['cost_usd'] or 0:.4f}  {row['wall_s']:.0f}s  (total ${spent:.2f})", flush=True)
+            if stopped:
+                print(f"Budget ${args.budget:.2f} reached (${spent:.2f} recorded); stopping. "
+                      "Continue with --resume and a higher --budget.")
+                break
+    summaries: Dict[str, Any] = {}
+    for spec, target in targets.items():
+        rows = [done[spec][c["query_id"]] for c in cases if c["query_id"] in done[spec]]
+        if not rows:
+            continue
+        predictions_path = os.path.join(out_dir, f"predictions_{target.slug}.jsonl")
+        with open(predictions_path, "w", encoding="utf-8") as preds:
+            for row in rows:
+                preds.write(json.dumps({"query_id": row["query_id"], "response": row["response"]},
+                                       ensure_ascii=False) + "\n")
         summary = _summary(rows)
         summaries[spec] = summary
         with open(os.path.join(out_dir, f"results_{target.slug}.json"), "w", encoding="utf-8") as fh:
             json.dump({"benchmark": "GeoKTools", "version": "1.0.0", "scorer": "qgissi port of score_structured_answer",
-                       "model": spec, "overall": summary, "per_case": rows}, fh, indent=2)
+                       "model": spec, "complete": len(rows) == len(cases), "overall": summary, "per_case": rows},
+                      fh, indent=2)
         if args.official_python:
             code, log = official_run(args.official_python, root, "geoktools.scoring.run_scoring",
                                      ["--predictions", os.path.abspath(predictions_path), "--output",
                                       os.path.abspath(os.path.join(out_dir, f"results_official_{target.slug}.json"))])
             print(f"official scorer exit {code}\n{log}")
-    lines = ["# GeoKTools (dev) results", "", "| Model | Score | 95% CI | K=1 | K=2 | K=3 | K=4 | Open subset | Cost |",
-             "|---|---|---|---|---|---|---|---|---|"]
+    lines = ["# GeoKTools (dev) results", "",
+             "| Model | Cases | Score | 95% CI | K=1 | K=2 | K=3 | K=4 | Open subset | Cost |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for spec, s in summaries.items():
         ks = [s["by_k_level"].get(f"K={k}", {}).get("accuracy") for k in (1, 2, 3, 4)]
         open_cell = (f"{s['open_subset']['accuracy']:.2f} (n={s['open_subset']['n']})" if s["open_subset"] else "–")
         k_cells = " | ".join("–" if v is None else f"{v:.2f}" for v in ks)
-        lines.append(f"| `{spec}` | **{s['accuracy']:.3f}** | {s['ci95'][0]:.2f}–{s['ci95'][1]:.2f} | {k_cells} | "
-                     f"{open_cell} | ${s['cost_usd']:.2f} |")
+        lines.append(f"| `{spec}` | {s['n']}/{len(cases)} | **{s['accuracy']:.3f}** | {s['ci95'][0]:.2f}–{s['ci95'][1]:.2f} "
+                     f"| {k_cells} | {open_cell} | ${s['cost_usd']:.2f} |")
     lines += ["", "Deterministic protocol (10% relative tolerance, 1-MAPE partial credit, ROUGE-L for strings). "
               "Golds use Google Maps data for 41 of 85 cases, so an open-data agent has a ceiling below 1.0; the "
               "open-subset column is an unofficial diagnostic."]
+    if stopped:
+        lines += ["", f"Stopped early by the ${args.budget:.2f} budget: scores cover only the recorded cases."]
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     print("\n".join(lines))
-    return 0
+    return 3 if stopped else 0

@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
-import time
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,7 +10,7 @@ from qgis.core import (QgsCoordinateReferenceSystem, QgsCoordinateTransform, Qgs
                        QgsGeometry, QgsPointXY, QgsRasterFileWriter, QgsRasterLayer, QgsRasterPipe,
                        QgsVectorFileWriter, QgsVectorLayer)
 
-from ..providers.http import HttpClient, HttpError
+from ..providers.http import HttpClient, HttpError, space_requests
 from ._qgis import add_to_project, make_field, output_path, parse_crs, resolve_layer, resolve_vector, safe_filename
 from .registry import Risk, ToolContext, ToolError, ToolResult, tool
 
@@ -21,8 +19,6 @@ OVERPASS = os.environ.get("QGISSI_OVERPASS_URL", "https://overpass-api.de/api/in
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
 _http = HttpClient(timeout=180, max_retries=2)
-_nominatim_lock = threading.Lock()
-_nominatim_last = [0.0]
 
 BASEMAPS = {
     "openstreetmap": ("OpenStreetMap", "https://tile.openstreetmap.org/{z}/{x}/{y}.png", 19, "© OpenStreetMap contributors"),
@@ -42,11 +38,7 @@ AREA_KEYS = {"building", "landuse", "leisure", "amenity", "natural", "water", "l
 def _nominatim(path: str, params: Dict[str, Any], ctx: ToolContext) -> Any:
     if not ctx.allow_network:
         raise ToolError("Network access is disabled in the settings.")
-    with _nominatim_lock:  # Nominatim usage policy: at most one request per second
-        wait = 1.1 - (time.time() - _nominatim_last[0])
-        if wait > 0:
-            time.sleep(wait)
-        _nominatim_last[0] = time.time()
+    space_requests("nominatim", 1.1)  # Nominatim usage policy: at most one request per second
     url = f"{NOMINATIM}/{path}?{urllib.parse.urlencode(params)}"
     try:
         return _http.get_json(url, {"Accept-Language": "en"}, ctx.cancel)

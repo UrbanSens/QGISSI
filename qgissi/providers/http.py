@@ -9,9 +9,12 @@ proxy support and cooperative cancellation.
 from __future__ import annotations
 
 import json
+import os
 import random
 import socket
 import ssl
+import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -21,6 +24,43 @@ from ..core.cancel import CancelledError, CancelToken
 
 USER_AGENT = "QGISSI/0.1 (+https://github.com/UrbanSens/QGISSI)"
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524, 529}
+
+_spacing_lock = threading.Lock()
+_spacing_last: Dict[str, float] = {}
+
+
+def space_requests(service: str, interval: float, stamp_dir: Optional[str] = None) -> None:
+    """Block until a request to ``service`` may start, at least ``interval`` s after the previous one.
+
+    The last start is kept in a locked stamp file, so separate QGIS or benchmark processes share the
+    limit. Without file locks (Windows) or a usable stamp file, the limit holds within this process.
+    """
+    with _spacing_lock:
+        path = os.path.join(stamp_dir or tempfile.gettempdir(), f"qgissi-{service}.stamp")
+        try:
+            import fcntl
+            with open(path, "a+", encoding="ascii") as fh:
+                fcntl.flock(fh, fcntl.LOCK_EX)  # released when the file closes
+                fh.seek(0)
+                try:
+                    last = float(fh.read().strip() or 0)
+                except ValueError:
+                    last = 0.0
+                _sleep_until(last + interval, interval)
+                fh.seek(0)
+                fh.truncate()
+                fh.write(repr(time.time()))
+            return
+        except (ImportError, OSError):
+            pass
+        _sleep_until(_spacing_last.get(service, 0.0) + interval, interval)
+        _spacing_last[service] = time.time()
+
+
+def _sleep_until(when: float, longest: float) -> None:
+    wait = when - time.time()
+    if 0 < wait <= longest:  # a stamp from the future (clock change) is ignored
+        time.sleep(wait)
 
 
 class HttpError(Exception):

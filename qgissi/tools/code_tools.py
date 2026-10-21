@@ -5,7 +5,8 @@ Defence in depth, none of which is a sandbox:
 2. a runtime audit-hook tripwire that is armed only on the executing thread
    while agent code runs: no process spawning (except GDAL/OGR/GRASS/SAGA
    binaries used by Processing), no sockets, no file writes or deletes outside
-   the output and temp folders, no blocked imports,
+   the output and temp folders, no blocked imports (Python-level only: native
+   code such as GDAL ``/vsicurl/`` or Qt network and file classes is not seen),
 3. a deadline enforced by a line tracer scoped to the agent's code,
 4. the run checkpoint (layers backed up before code runs, undo available).
 """

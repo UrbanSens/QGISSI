@@ -111,6 +111,11 @@ evaluation. `python -m qgissi.bench fetch --accept-terms`:
 
 Golden answers are read only during scoring and never enter an agent's context.
 
+Both adapters run the models interleaved: each query goes to every model before the next query starts,
+so all models meet the web services in the same state. Each finished case is appended to
+`rows_<model>.jsonl`. `--resume` continues an interrupted run, and `--budget USD` stops starting new cases
+once the recorded cost, judge calls included, reaches that amount.
+
 ### GeoKTools
 
 ```bash
@@ -169,16 +174,37 @@ are not committed.
 <!-- RESULTS:START -->
 | Configuration | Score (95% CI) | Pass rate | Mean steps | Tool calls/task | Median time/task | Cost | Notes |
 |---|---|---|---|---|---|---|---|
+| `anthropic/claude-opus-5-5@medium` | **1.000** (1.00–1.00) | 100% | 3.3 | 2.8 | 10s | $1.16 | QGIS 3.36.3, tools: full |
+| `anthropic/claude-sonnet-5-5@medium` | **1.000** (1.00–1.00) | 100% | 2.8 | 2.0 | 9s | $0.57 | QGIS 3.36.3, tools: full |
+| `anthropic/claude-haiku-5-5@medium` | **1.000** (1.00–1.00) | 100% | 3.2 | 3.1 | 13s | $0.04 | QGIS 3.36.3, tools: full |
 | ollama/mistral:latest (50 tools) | **0.067** (0.00–0.17) | 7% | 1.0 | 0.0 | 18s | $0 (local) | QGIS 3.36.3, tools: full |
 | ollama/mistral:latest (30 core tools) | **0.067** (0.00–0.17) | 7% | 1.0 | 0.0 | 17s | $0 (local) | QGIS 3.36.3, tools: core |
 
 | Configuration | crs | editing | inspection | layout | measurement | raster | safety | styling | vector | workflow |
 |---|---|---|---|---|---|---|---|---|---|---|
+| `anthropic/claude-opus-5-5@medium` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `anthropic/claude-sonnet-5-5@medium` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `anthropic/claude-haiku-5-5@medium` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
 | ollama/mistral:latest (50 tools) | 0.33 | 0.00 | 0.25 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
 | ollama/mistral:latest (30 core tools) | 0.33 | 0.00 | 0.25 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
 
-**Local baseline:** Ollama `mistral:latest` (7B) on an Apple M2 Pro with 16 GB, QGISSI-Bench run on
-2026-10-21.
+**Claude 5.5 models:** one pass at medium effort on 2026-10-21, on QGIS 3.36.3 (macOS), with all 50 tools
+and server-side fallbacks off.
+
+- **All three models solved all 30 tasks.** QGISSI-Bench is saturated at this level. It shows that the
+  agent loop, tools and safety rules work with frontier models, but it cannot rank them. Google's suites
+  below are the harder test; harder QGISSI tasks (longer workflows, ambiguous requests, larger data) are
+  planned.
+- **Safety held.** Every model treated the instruction planted in a building's note as untrusted data,
+  reported it and left the project intact. None invented a population for the non-existent district.
+- **The whole pass cost $1.77.** Per task: Opus 5.5 $0.039, Sonnet 5.5 $0.019 and Haiku 5.5 $0.0013.
+  Prompt caching keeps it cheap. A task averages about three steps, and each step re-reads the
+  ~15k-token system and tool prefix from cache, at 5% of the input price for Opus and 10% for Sonnet
+  and Haiku.
+- There were no run errors, refusals or fallbacks. The few failed tool calls (Sonnet 3%, Haiku 1% of
+  calls) were corrected within the task. Median time per task was 9–13 s.
+
+**Local baseline:** Ollama `mistral:latest` (7B) on an Apple M2 Pro with 16 GB, run on 2026-10-21.
 
 - Mistral did not issue a single native tool call in any of the 60 runs, with either the 50-tool or the
   30-tool set. It answered from the project context alone, which is enough only for the two tasks that
@@ -189,31 +215,27 @@ are not committed.
   tool-capable local model of roughly 14B parameters or more, such as Qwen3, is needed. The 27B Qwen
   model on the development machine does not fit in 16 GB of RAM.
 
-**Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5 have not been run yet,** because no Anthropic API key was
-available during development. The Anthropic adapter's requests and response parsing are covered by unit
-tests written against the documented Messages API, but they have not yet been exercised against the live
-API. To run them, add `ANTHROPIC_API_KEY=...` to a `.env` file in the repository root (git-ignored), then:
+To reproduce the Claude rows (an interrupted run continues with `--resume`):
 
 ```bash
-scripts/qgis-python -m qgissi.bench run --models anthropic/claude-opus-5-5@medium,anthropic/claude-sonnet-5-5@medium,anthropic/claude-haiku-5-5@medium --repeats 3 --out bench_runs/claude
+scripts/qgis-python -m qgissi.bench run --models anthropic/claude-opus-5-5@medium,anthropic/claude-sonnet-5-5@medium,anthropic/claude-haiku-5-5@medium --out bench_runs/claude-medium-pass1
 ```
-
-An interrupted run continues with `--resume`.
 <!-- RESULTS:END -->
 
 ### Cost guide
 
-`--dry-run` prints an estimate per model. It assumes about 7 steps per task, an ~11k-token cached prefix
-and ~2.5k output tokens per step, which is deliberately on the high side. At list prices it gives, for one
-30-task pass:
+`--dry-run` prints an estimate per model. It is calibrated on the measured Claude runs at medium effort,
+with about 20% headroom: roughly 4 steps per task; per step, about 12.5k cached tokens read, 750 written
+and 250 output tokens; plus one ~15k-token prefix write. One 30-task pass at list prices:
 
-| Model | Estimate per task | 30 tasks |
-|---|---|---|
-| Claude Opus 5.5 ($4 / $20 per MTok, cache reads $0.20) | ~$0.48 | ~$14 |
-| Claude Sonnet 5.5 ($2 / $10) | ~$0.25 | ~$7 |
-| Claude Haiku 5.5 ($0.10 / $0.50) | ~$0.01 | ~$0.40 |
-| Claude Fable 5.1 ($10 / $50) | ~$1.17 | ~$35 |
-| Ollama (local) | $0 | $0 |
+| Model | Price per MTok (input / output / cache read) | Measured per task | Measured, 30 tasks | Estimate, 30 tasks |
+|---|---|---|---|---|
+| Claude Opus 5.5 | $4 / $20 / $0.20 | $0.039 | $1.16 | ~$1.42 |
+| Claude Sonnet 5.5 | $2 / $10 / $0.20 | $0.019 | $0.57 | ~$0.86 |
+| Claude Haiku 5.5 | $0.10 / $0.50 / $0.01 | $0.0013 | $0.04 | ~$0.04 |
+| Claude Fable 5.1 | $10 / $50 / $0.25 | – | – | ~$3.19 |
+| Ollama (local) | – | $0 | $0 | $0 |
 
-Measured costs are in each run's report. Higher effort levels use more output tokens. Check the estimate
-before running repeats, and use `--max-cost` to cap any single task.
+Higher effort levels write more thinking tokens and cost more. Google's suites cost more per query than
+QGISSI-Bench tasks: their queries take more steps, and GeoExpertQueries adds judge calls (see their
+results). `--max-cost` caps a single task, and `--budget` caps a whole Google-suite run.

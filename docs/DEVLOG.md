@@ -73,7 +73,7 @@ before the merge to `main`. All are fixed and each has a regression test:
 
 ## 5. Verification
 
-- **Unit tests:** 103 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
+- **Unit tests:** 107 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
   silent stream at once. They cover provider payloads and stream parsing (Anthropic,
   OpenAI, Gemini, Ollama), agent-loop semantics, registry coercion, the code guard, scrubbing, pricing,
   Markdown, and scorer parity with all 30 upstream test vectors. They pass on Python 3.9 and 3.12.
@@ -88,13 +88,17 @@ before the merge to `main`. All are fixed and each has a regression test:
   ERA5-Land; the Rhode Island boundary extent matches the published GeoKTools example answer.
 - **Benchmark pipelines** run end to end with a local model on GeoKTools and GeoExpertQueries, producing
   official-format predictions and traces.
+- **Live Anthropic API:** Opus 5.5, Sonnet 5.5 and Haiku 5.5 ran QGISSI-Bench through the stdlib adapter
+  (all 30/30, $1.77). Prompt caching, replayed thinking signatures and the fallback beta worked as
+  documented. Results are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## 6. Open items
 
-- Run the Claude model benchmarks (Opus 5.5 / Sonnet 5.5 / Haiku 5.5) once an API key is available, and
-  publish the results in [BENCHMARKS.md](BENCHMARKS.md).
+- Harder QGISSI-Bench tasks (longer workflows, ambiguous requests, larger data). Claude Opus, Sonnet and
+  Haiku 5.5 all score 30/30, so the suite no longer ranks frontier models.
 - Run long Processing algorithms in a `QgsTask`, so QGIS stays responsive.
-- Optional child-process isolation for agent code.
+- Child-process isolation for agent code. The audit-hook tripwire cannot see native code; a GeoKTools
+  run fetched data through GDAL's `/vsicurl/` after `urllib` was refused.
 - OpenAI Responses API adapter, to carry reasoning between turns.
 - Data Commons, NEX-GDDP-CMIP6 and Aqueduct tools, to reach more GeoKTools templates.
 - Persist chats per project.

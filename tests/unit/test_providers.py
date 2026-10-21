@@ -1,5 +1,9 @@
 """Provider adapters: request shapes and response parsing (no network)."""
 import json
+import os
+import subprocess
+import sys
+import time
 
 import pytest
 
@@ -11,6 +15,8 @@ from qgissi.providers.ollama import OllamaProvider
 from qgissi.providers.openai_chat import OpenAIChatProvider
 
 from .fakes import FakeHttp, http_400
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TOOLS = [ToolSpec("zeta", "z", {"type": "object", "properties": {}, "required": []}),
          ToolSpec("alpha", "a", {"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]})]
@@ -209,3 +215,18 @@ def test_ollama_stream_with_tool_calls():
     assert response.usage.input_tokens == 50 and response.message.thinking_text() == "hmm"
     payload = provider.http.requests[0]["payload"]
     assert payload["think"] is True and payload["options"]["num_ctx"] == 32768
+
+
+def test_request_spacing_is_shared_between_processes(tmp_path):
+    from qgissi.providers.http import space_requests
+
+    start = time.time()
+    space_requests("svc", 0.3, str(tmp_path))
+    space_requests("svc", 0.3, str(tmp_path))
+    assert time.time() - start >= 0.25
+    child = ("import sys, time; from qgissi.providers.http import space_requests; t = time.time(); "
+             "space_requests('svc', 2.0, sys.argv[1]); print(time.time() - t)")
+    space_requests("svc", 2.0, str(tmp_path))  # a stamp written now: the other process must wait
+    proc = subprocess.run([sys.executable, "-c", child, str(tmp_path)], cwd=ROOT, capture_output=True,
+                          text=True, check=True)
+    assert float(proc.stdout) >= 0.5
