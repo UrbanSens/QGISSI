@@ -90,7 +90,7 @@ sequenceDiagram
 | Models | One, chosen by the vendor | Claude Opus 5.5 / Sonnet 5.5 / Haiku 5.5 / Fable 5.1, OpenAI, Gemini, any OpenAI-compatible server, Ollama (offline) |
 | Account / cost | TerraLab account, quota, Pro plan | None. You pay the model provider at list price, or nothing with local models |
 | Prompts and tool docs | Server-side, closed | In this repository (`qgissi/core/prompts.py`, tool descriptions in `qgissi/tools/`) |
-| Tools | 229 static tools plus Processing | 51 curated tools; all ~700 Processing algorithms through search, help and run |
+| Tools | 229 static tools plus Processing | 50 curated tools; all ~700 Processing algorithms through search, help and run |
 | CRS safety | Guard on distances in degrees | Same idea: a distance parameter on a geographic-CRS input is refused with a fix |
 | Approvals | Ask first / Balanced / Autopilot (paid) | The same three modes, all free |
 | Code safety | AST guard, tripwire, child process | AST guard, audit-hook tripwire armed only on the executing thread, deadline tracer, restricted builtins, output-folder write roots |
