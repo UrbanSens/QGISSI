@@ -116,6 +116,15 @@ so all models meet the web services in the same state. Each finished case is app
 `rows_<model>.jsonl`. `--resume` continues an interrupted run, and `--budget USD` stops starting new cases
 once the recorded cost, judge calls included, reaches that amount.
 
+Model-written PyQGIS code can crash QGIS in native code; one GeoExpertQueries run died inside
+`QgsError.summary()`. Every tool call is therefore logged to `calls.jsonl` in the case's run folder
+before it runs, and `inflight.json` names the case in progress. `--resume --record-crash` scores that
+case as `crashed` (0, cost unknown) and carries on. `scripts/run-google-suite` does this automatically:
+
+```bash
+scripts/run-google-suite geoktools --models anthropic/claude-opus-5-5@medium --accept-terms --out bench_runs/geoktools --budget 25
+```
+
 ### GeoKTools
 
 ```bash

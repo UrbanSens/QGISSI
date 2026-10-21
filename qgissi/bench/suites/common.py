@@ -29,10 +29,20 @@ def run_query(target: ModelTarget, query: str, args, work_dir: str) -> Tuple[Run
         return ToolContext(project=project, output_dir=output_dir, cancel=cancel, run_id=run_id, headless=True,
                            allow_network=True)
 
+    calls_path = os.path.join(work_dir, "calls.jsonl")
+
+    def record_call(kind: str, payload: Dict[str, Any]) -> None:
+        # on disk before the tool runs, so a crash in native code leaves the culprit behind
+        if kind == "tool_call":
+            with open(calls_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"name": payload["name"], "input": payload["input"]}, ensure_ascii=False,
+                                    default=str) + "\n")
+
     config = AgentConfig(provider=target.provider_name, model=target.model, effort=target.effort,
                          max_steps=args.max_steps, max_cost_usd=args.max_cost, max_seconds=args.max_seconds,
                          tool_tier=args.tool_tier, unattended=True, allow_fallback=args.allow_fallback)
-    session = AgentSession(target.provider, config, ctx_factory=ctx_factory, context_builder=build_project_context)
+    session = AgentSession(target.provider, config, ctx_factory=ctx_factory, context_builder=build_project_context,
+                           emit=record_call)
     run = session.run_turn(query)
     with open(os.path.join(work_dir, "transcript.json"), "w", encoding="utf-8") as fh:
         json.dump({"query": query, "result": run.to_dict(), "messages": _transcript(session)}, fh,

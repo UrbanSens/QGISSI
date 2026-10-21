@@ -15,7 +15,8 @@ from typing import Dict, List
 
 from ..scoring import NORMALIZED, mean, parse_rating, render_autorater_prompt
 from .georeason import fetch, load_cases
-from .rows import append_row, load_rows, open_rows, row_cost
+from .rows import (append_row, clear_inflight, crashed_record, load_rows, mark_inflight, open_rows, row_cost,
+                   take_inflight)
 
 PROMPTS = {"tool_agnostic": "tool_agnostic_autorater_prompt.txt", "workflow": "workflow_autorater_prompt.txt"}
 
@@ -87,6 +88,14 @@ def run_geoexpert(args) -> int:
     stopped = False
     with contextlib.ExitStack() as stack:
         files = {spec: stack.enter_context(open_rows(paths[spec], args.resume)) for spec in models}
+        died = take_inflight(out_dir)
+        if died and args.resume and args.record_crash and died["spec"] in done:
+            case = next((c for c in cases if c["query_id"] == died["query_id"]), None)
+            if case and case["query_id"] not in done[died["spec"]]:
+                row = {"query_id": case["query_id"], "domain_cluster": case["domain_cluster"], "solvability": case["solvability"], "score": 0.0, "runs": [], "judge_cost_usd": 0.0, "trace": "", **crashed_record()}
+                append_row(files[died["spec"]], row)
+                done[died["spec"]][case["query_id"]] = row
+                print(f"Recorded {died['spec']} {case['query_id']} as crashed", flush=True)
         for i, case in enumerate(cases, 1):
             # interleaved, so every model meets the web services in the same state
             for spec, target in targets.items():
@@ -96,6 +105,7 @@ def run_geoexpert(args) -> int:
                     stopped = True
                     break
                 work_dir = os.path.join(out_dir, "runs", target.slug, case["query_id"])
+                mark_inflight(out_dir, spec, case["query_id"])
                 run, session = run_query(target, case["query"], args, work_dir)
                 trace = condense_trace(session, run, spec)
                 prompt = render_autorater_prompt(template, case, trace, True, manifest)
@@ -113,6 +123,7 @@ def run_geoexpert(args) -> int:
                        "solvability": case["solvability"], "score": round(score, 4), "runs": ratings,
                        "judge_cost_usd": round(judge_cost, 6), "trace": trace, **run_record(run)}
                 append_row(files[spec], row)
+                clear_inflight(out_dir)
                 done[spec][case["query_id"]] = row
                 spent += row_cost(row)
                 print(f"[{i}/{len(cases)}] {spec:<36} {case['query_id']}  score={score:.2f}  {row['status']}  "
@@ -122,6 +133,7 @@ def run_geoexpert(args) -> int:
                       "Continue with --resume and a higher --budget.")
                 break
     table: List[str] = []
+    crashes: Dict[str, int] = {}
     for spec, target in targets.items():
         per_case = [done[spec][c["query_id"]] for c in cases if c["query_id"] in done[spec]]
         if not per_case:
@@ -132,6 +144,8 @@ def run_geoexpert(args) -> int:
                 traces.write(json.dumps({"query_id": row["query_id"], "agent_execution_trace": row["trace"]},
                                         ensure_ascii=False) + "\n")
         overall = mean(r["score"] for r in per_case)
+        if any(r["status"] == "crashed" for r in per_case):
+            crashes[spec] = sum(1 for r in per_case if r["status"] == "crashed")
         groups = {key: {value: round(mean(r["score"] for r in per_case if r[key] == value), 4)
                         for value in sorted({r[key] for r in per_case})}
                   for key in ("solvability", "domain_cluster")}
@@ -161,6 +175,9 @@ def run_geoexpert(args) -> int:
              f"{args.num_runs} run(s) per case, Likert-3 mapped to 0/0.5/1.", "",
              "| Model | Cases | Score | Solvable | Beyond toolset | Agent cost | Judge cost |",
              "|---|---|---|---|---|---|---|", *table]
+    if crashes:
+        lines += ["", "QGIS crashed during " + ", ".join(f"{n} `{spec}` case(s)" for spec, n in crashes.items())
+                  + "; each is scored 0."]
     if stopped:
         lines += ["", f"Stopped early by the ${args.budget:.2f} budget: scores cover only the recorded cases."]
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:

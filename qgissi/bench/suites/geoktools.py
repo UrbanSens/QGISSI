@@ -13,7 +13,8 @@ from typing import Any, Dict, List
 
 from ..scoring import bootstrap_ci, extract_answer_list, mean, score_structured_answer
 from .georeason import fetch, load_cases
-from .rows import append_row, load_rows, open_rows, row_cost
+from .rows import (append_row, clear_inflight, crashed_record, load_rows, mark_inflight, open_rows, row_cost,
+                   take_inflight)
 
 # Templates whose answers can be reproduced from open data (unofficial diagnostic,
 # see docs/BENCHMARKS.md); the rest depend on Google Maps POIs or a gated API.
@@ -35,7 +36,8 @@ def _summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"n": len(rows), "accuracy": round(mean(scores), 4), "ci95": bootstrap_ci(scores, 10000), "by_k_level": by_k,
             "open_subset": {"n": len(open_scores), "accuracy": round(mean(open_scores), 4)} if open_scores else None,
             "cost_usd": round(sum(r["cost_usd"] or 0 for r in rows), 4),
-            "extraction_failed": sum(1 for r in rows if not r["extracted"])}
+            "extraction_failed": sum(1 for r in rows if not r["extracted"]),
+            "crashed": sum(1 for r in rows if r["status"] == "crashed")}
 
 
 def run_geoktools(args) -> int:
@@ -62,6 +64,14 @@ def run_geoktools(args) -> int:
     stopped = False
     with contextlib.ExitStack() as stack:
         files = {spec: stack.enter_context(open_rows(paths[spec], args.resume)) for spec in models}
+        died = take_inflight(out_dir)
+        if died and args.resume and args.record_crash and died["spec"] in done:
+            case = next((c for c in cases if c["query_id"] == died["query_id"]), None)
+            if case and case["query_id"] not in done[died["spec"]]:
+                row = {"query_id": case["query_id"], "k_level": case["k_level"], "template_id": case["template_id"], "score": 0.0, "extracted": False, "response": "", **crashed_record()}
+                append_row(files[died["spec"]], row)
+                done[died["spec"]][case["query_id"]] = row
+                print(f"Recorded {died['spec']} {case['query_id']} as crashed", flush=True)
         for i, case in enumerate(cases, 1):
             # interleaved, so every model meets the web services in the same state
             for spec, target in targets.items():
@@ -71,6 +81,7 @@ def run_geoktools(args) -> int:
                     stopped = True
                     break
                 work_dir = os.path.join(out_dir, "runs", target.slug, case["query_id"])
+                mark_inflight(out_dir, spec, case["query_id"])
                 run, _session = run_query(target, case["query"], args, work_dir)
                 response, extracted = extract_answer_list(run.final_text, case["query"].count("__"))
                 answer = response if response is not None else (run.final_text or "")
@@ -78,6 +89,7 @@ def run_geoktools(args) -> int:
                 row = {"query_id": case["query_id"], "k_level": case["k_level"], "template_id": case["template_id"],
                        "score": round(score, 4), "extracted": extracted, "response": answer, **run_record(run)}
                 append_row(files[spec], row)
+                clear_inflight(out_dir)
                 done[spec][case["query_id"]] = row
                 spent += row_cost(row)
                 print(f"[{i}/{len(cases)}] {spec:<36} {case['query_id']}  K={case['k_level']}  score={score:.2f}  "
@@ -119,6 +131,10 @@ def run_geoktools(args) -> int:
     lines += ["", "Deterministic protocol (10% relative tolerance, 1-MAPE partial credit, ROUGE-L for strings). "
               "Golds use Google Maps data for 41 of 85 cases, so an open-data agent has a ceiling below 1.0; the "
               "open-subset column is an unofficial diagnostic."]
+    crashes = {spec: s["crashed"] for spec, s in summaries.items() if s["crashed"]}
+    if crashes:
+        lines += ["", "QGIS crashed during " + ", ".join(f"{n} `{spec}` case(s)" for spec, n in crashes.items())
+                  + "; each is scored 0."]
     if stopped:
         lines += ["", f"Stopped early by the ${args.budget:.2f} budget: scores cover only the recorded cases."]
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:

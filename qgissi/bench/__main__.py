@@ -227,6 +227,9 @@ def main(argv=None) -> int:
         p.add_argument("--official-python", default="", help="Python >= 3.10 to also run Google's official runners")
         p.add_argument("--resume", action="store_true",
                        help="Continue an interrupted run in --out: skip model/case runs already recorded")
+        p.add_argument("--record-crash", action="store_true",
+                       help="With --resume: score the case that was running when the previous process crashed "
+                            "as a failure (status 'crashed') instead of running it again")
         p.add_argument("--budget", type=float, default=0.0,
                        help="Stop starting new cases once the cost recorded in --out reaches this many USD, "
                             "judge calls included (0 = no limit)")

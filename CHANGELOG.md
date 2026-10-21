@@ -6,10 +6,12 @@
   medium effort. The pass cost $1.77 (see [docs/BENCHMARKS.md](docs/BENCHMARKS.md)).
 - **Google suites**: `--resume` and `--budget` for GeoKTools and GeoExpertQueries. Models run interleaved
   per query, and judge costs are recorded and reported.
+- **Crash-tolerant runs**: every tool call is logged before it runs, and `--record-crash` scores a case
+  during which QGIS crashed as a failure. `scripts/run-google-suite` restarts the run after a crash.
 - **Cost estimate**: `--dry-run` is recalibrated on the measured runs; it was about 12 times too high.
 - **Nominatim**: the one-request-per-second limit now holds across processes (POSIX).
 - **Docs**: the code tripwire's blind spot for native code (GDAL `/vsicurl/`, Qt) is documented.
-- **Quality**: 107 unit tests.
+- **Quality**: 108 unit tests.
 
 ## 0.1.0 (2026-10-21)
 

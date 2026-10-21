@@ -2,7 +2,8 @@
 import pytest
 
 from qgissi.bench import judge
-from qgissi.bench.suites.rows import append_row, load_rows, open_rows, row_cost
+from qgissi.bench.suites.rows import (append_row, clear_inflight, crashed_record, load_rows, mark_inflight,
+                                      open_rows, row_cost, take_inflight)
 from qgissi.providers.base import Message, ModelResponse, Usage, text_block
 
 
@@ -40,3 +41,16 @@ def test_judge_reports_its_cost(monkeypatch):
     assert reply == "Rating: 2" and cost == pytest.approx(4.0 + 2.0)
     assert judge.ask("anthropic/claude-opus-5-5@medium", "prompt") == "Rating: 2"
 
+
+def test_inflight_marker_names_the_case_a_dead_process_was_running(tmp_path):
+    out = str(tmp_path)
+    assert take_inflight(out) is None
+    mark_inflight(out, "anthropic/claude-sonnet-5-5@medium", "geoexpert_dev_001")
+    assert take_inflight(out) == {"spec": "anthropic/claude-sonnet-5-5@medium", "query_id": "geoexpert_dev_001"}
+    assert take_inflight(out) is None  # taken once
+    mark_inflight(out, "m", "q")
+    clear_inflight(out)  # the case finished normally
+    assert take_inflight(out) is None
+    (tmp_path / "inflight.json").write_text('{"spec": "m"')  # torn write
+    assert take_inflight(out) is None
+    assert crashed_record()["status"] == "crashed" and crashed_record()["cost_usd"] is None

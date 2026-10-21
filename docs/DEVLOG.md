@@ -73,7 +73,7 @@ before the merge to `main`. All are fixed and each has a regression test:
 
 ## 5. Verification
 
-- **Unit tests:** 107 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
+- **Unit tests:** 108 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
   silent stream at once. They cover provider payloads and stream parsing (Anthropic,
   OpenAI, Gemini, Ollama), agent-loop semantics, registry coercion, the code guard, scrubbing, pricing,
   Markdown, and scorer parity with all 30 upstream test vectors. They pass on Python 3.9 and 3.12.

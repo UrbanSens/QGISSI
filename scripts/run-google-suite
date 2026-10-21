@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Run one of Google's suites to completion. --resume is added; when QGIS crashes (SIGSEGV, SIGABRT,
+# SIGBUS), the case that was running is scored as crashed and the run continues.
+# Usage: scripts/run-google-suite geoktools|geoexpert <qgissi.bench arguments, including --out>
+set -uo pipefail  # no -e: the exit status of each attempt is inspected
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUITE=$1
+shift
+EXTRA=()
+for attempt in $(seq 1 50); do
+  "$HERE/qgis-python" -m qgissi.bench "$SUITE" --resume "$@" ${EXTRA[@]+"${EXTRA[@]}"}
+  code=$?
+  case $code in
+    134|138|139) echo "QGIS crashed (exit $code, attempt $attempt): recording the case and resuming" >&2
+                 EXTRA=(--record-crash) ;;
+    *) exit $code ;;
+  esac
+done
+exit $code
