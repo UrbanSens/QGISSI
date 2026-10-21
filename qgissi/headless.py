@@ -30,6 +30,14 @@ def guess_prefix() -> str:
     return "/usr"
 
 
+def profile_dir() -> str:
+    """Isolated settings/auth folder so headless runs never touch a user's QGIS profile."""
+    path = os.environ.get("QGISSI_PROFILE_DIR") or os.path.join(
+        os.environ.get("QGISSI_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "qgissi")), "headless-profile")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 def start_qgis(gui: bool = False):
     """Start (once) a QgsApplication and the Processing framework."""
     global _APP
@@ -42,6 +50,8 @@ def start_qgis(gui: bool = False):
     if _APP is not None:
         return _APP
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # QGIS honours this variable (not the constructor's profileFolder argument) for settings and the auth DB.
+    os.environ.setdefault("QGIS_CUSTOM_CONFIG_PATH", profile_dir())
     QgsApplication.setPrefixPath(guess_prefix(), True)
     _APP = QgsApplication([], gui)
     _APP.initQgis()
