@@ -20,7 +20,7 @@ PROMPTS = {"tool_agnostic": "tool_agnostic_autorater_prompt.txt", "workflow": "w
 
 def condense_trace(session, run, spec: str, limit_chars: int = 60000) -> str:
     from ... import __version__
-    lines = [f"[AGENT] QGISSI {__version__} | model={spec} | started={datetime.datetime.utcnow().isoformat()}Z | "
+    lines = [f"[AGENT] QGISSI {__version__} | model={spec} | started={datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")} | "
              f"status={run.status} | steps={len(run.steps)}"]
     step = 0
     names: Dict[str, str] = {}
@@ -29,6 +29,9 @@ def condense_trace(session, run, spec: str, limit_chars: int = 60000) -> str:
             kind = block.get("type")
             if message.role == "assistant" and kind == "text" and block.get("text", "").strip():
                 lines.append(f"[NOTE] {block['text'].strip()[:1500]}")
+            elif message.role == "assistant" and kind == "thinking" and block.get("thinking", "").strip():
+                # Claude 5.5 models return progress notes between tool calls as summarised thinking
+                lines.append(f"[NOTE] {block['thinking'].strip()[:800]}")
             elif kind == "tool_use":
                 step += 1
                 names[block["id"]] = block["name"]
