@@ -1,6 +1,6 @@
-"""Importing this package registers every tool in :data:`registry.REGISTRY`."""
-from . import (code_tools, data_tools, edit_tools, map_tools, processing_tools,  # noqa: F401 (registration)
-               project_tools, query_tools, style_tools)
+"""QGISSI tools. The built-in (PyQGIS) tools register themselves in
+:data:`registry.REGISTRY` the first time the registry is queried, so pure-Python
+parts of QGISSI (providers, agent loop, scoring) import without QGIS."""
 from .registry import REGISTRY, Risk, ToolContext, ToolError, ToolResult
 
 __all__ = ["REGISTRY", "Risk", "ToolContext", "ToolError", "ToolResult"]

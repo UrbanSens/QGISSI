@@ -103,8 +103,14 @@ class ToolDef:
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(self, loader: Optional[Callable[[], None]] = None) -> None:
         self._tools: Dict[str, ToolDef] = {}
+        self._loader = loader
+
+    def _ensure_loaded(self) -> None:
+        if self._loader is not None:
+            loader, self._loader = self._loader, None
+            loader()
 
     def add(self, definition: ToolDef) -> ToolDef:
         if definition.name in self._tools:
@@ -123,13 +129,16 @@ class ToolRegistry:
         return decorator
 
     def get(self, name: str) -> Optional[ToolDef]:
+        self._ensure_loaded()
         return self._tools.get(name)
 
     def names(self) -> List[str]:
+        self._ensure_loaded()
         return sorted(self._tools)
 
     def select(self, tier: str = "full", gui: bool = True,
                exclude: Optional[List[str]] = None) -> List[ToolDef]:
+        self._ensure_loaded()
         chosen = []
         for definition in self._tools.values():
             if tier == "core" and definition.tier != "core":
@@ -255,5 +264,10 @@ def as_result(value: Any) -> ToolResult:
     return ToolResult(data=value)
 
 
-REGISTRY = ToolRegistry()
+def _load_builtin_tools() -> None:
+    from . import (code_tools, data_tools, edit_tools, map_tools, processing_tools,  # noqa: F401
+                   project_tools, query_tools, style_tools)
+
+
+REGISTRY = ToolRegistry(loader=_load_builtin_tools)
 tool = REGISTRY.tool

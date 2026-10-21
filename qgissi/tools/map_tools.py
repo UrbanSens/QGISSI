@@ -37,15 +37,17 @@ def _visible_layers(ctx: ToolContext) -> List[Any]:
 
 def _full_extent(ctx: ToolContext, layers: List[Any]) -> QgsRectangle:
     dest = _dest_crs(ctx)
-    extent = QgsRectangle()
-    extent.setMinimal()
+    extent: Optional[QgsRectangle] = None
     for layer in layers:
         layer_extent = layer.extent()
         if layer_extent.isEmpty() or "type=xyz" in layer.source():
             continue
         box = QgsCoordinateTransform(layer.crs(), dest, ctx.project).transformBoundingBox(layer_extent)
-        extent.combineExtentWith(box)
-    if extent.isEmpty():
+        if extent is None:
+            extent = QgsRectangle(box)
+        else:
+            extent.combineExtentWith(box)
+    if extent is None or extent.isEmpty():
         raise ToolError("Nothing to show: no visible layer with an extent.")
     extent.scale(1.05)
     return extent
