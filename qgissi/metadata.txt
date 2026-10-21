@@ -8,7 +8,7 @@ about=
     QGISSI (QGIS Spatial Intelligence) is an AI agent that works on the project you have open.
 
     • Your model, your key: Anthropic Claude (Opus 5.5 by default), OpenAI, Google Gemini, any OpenAI-compatible server, or Ollama for fully local, offline use. No account, no subscription, no vendor server in between.
-    • 49 tools: project and layer inspection, statistics and expressions, every QGIS Processing algorithm (search, help, run) with CRS-unit guards, styling and labels, OpenStreetMap and geocoding, editing, map rendering the model can look at, print layouts, and guarded PyQGIS code.
+    • 50 tools: project and layer inspection, statistics and expressions, every QGIS Processing algorithm (search, help, run) with CRS-unit guards, styling and labels, OpenStreetMap and geocoding, editing, map rendering the model can look at, print layouts, and guarded PyQGIS code.
     • You stay in control: approval modes, a code safety guard with a runtime tripwire, untrusted-data labelling against prompt injection, secret masking, and one-click undo per run.
     • Open prompts and tools, live token and cost meter, no telemetry.
     • Benchmark harness: QGISSI-Bench (30 verifiable QGIS tasks) plus adapters for Google's GeoKTools and GeoExpertQueries, to compare models on accuracy, cost and latency.
@@ -27,4 +27,4 @@ hasProcessingProvider=no
 server=False
 changelog=
     0.1.0
-    - First release: local agent loop, five model providers, 49 tools, approvals and undo, QGISSI-Bench
+    - First release: local agent loop, five model providers, 50 tools, approvals and undo, QGISSI-Bench
