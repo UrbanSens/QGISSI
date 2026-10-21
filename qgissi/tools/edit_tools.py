@@ -26,7 +26,7 @@ def _editable_or_fail(layer, capability, what: str) -> None:
        "type": {"type": "string", "enum": ["string", "integer", "integer64", "double", "boolean", "date", "datetime"]},
        "length": {"type": "integer", "description": "Optional length (strings)."},
        "precision": {"type": "integer", "description": "Optional decimals (double)."}},
-      required=["layer", "name", "type"], risk=Risk.DESTRUCTIVE, category="editing")
+      required=["layer", "name", "type"], risk=Risk.DESTRUCTIVE, category="editing", tier="extended")
 def add_field(ctx: ToolContext, layer: str, name: str, type: str, length: int = 0,  # noqa: A002
               precision: int = 0) -> str:
     lyr = resolve_vector(ctx, layer)
@@ -114,7 +114,7 @@ def calculate_field(ctx: ToolContext, layer: str, field: str, expression: str, f
 @tool("delete_features", "Delete features matching a QGIS expression from a vector layer (in place).",
       {"layer": {"type": "string"},
        "where": {"type": "string", "description": "Expression selecting the features to delete (required)."}},
-      required=["layer", "where"], risk=Risk.DESTRUCTIVE, category="editing")
+      required=["layer", "where"], risk=Risk.DESTRUCTIVE, category="editing", tier="extended")
 def delete_features(ctx: ToolContext, layer: str, where: str) -> Dict[str, Any]:
     lyr = resolve_vector(ctx, layer)
     if not where.strip():

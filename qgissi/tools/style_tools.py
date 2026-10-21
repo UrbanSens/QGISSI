@@ -215,7 +215,7 @@ def set_heatmap_style(ctx: ToolContext, layer: str, radius: float = 10.0, color_
        "max_value": {"type": "number", "description": "Maximum value (default: band max)."},
        "rgb_bands": {"type": "array", "items": {"type": "integer"}, "description": "[r, g, b] bands for rgb."},
        "opacity": {"type": "number", "description": "0-1."}},
-      required=["layer", "style"], risk=Risk.WRITE, category="styling")
+      required=["layer", "style"], risk=Risk.WRITE, category="styling", tier="extended")
 def set_raster_style(ctx: ToolContext, layer: str, style: str, band: int = 1, color_ramp: str = "",
                      invert_ramp: bool = False, min_value: Optional[float] = None,
                      max_value: Optional[float] = None, rgb_bands: Optional[list] = None,
@@ -303,7 +303,7 @@ def set_labels(ctx: ToolContext, layer: str, text: str = "", enabled: bool = Tru
 @tool("set_layer_opacity", "Set the overall opacity of any layer (0 transparent - 1 opaque).",
       {"layer": {"type": "string", "description": "Layer name or id."},
        "opacity": {"type": "number", "description": "0-1."}},
-      required=["layer", "opacity"], risk=Risk.WRITE, category="styling")
+      required=["layer", "opacity"], risk=Risk.WRITE, category="styling", tier="extended")
 def set_layer_opacity(ctx: ToolContext, layer: str, opacity: float) -> str:
     lyr = resolve_layer(ctx, layer)
     value = max(0.0, min(1.0, float(opacity)))

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  unit:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest
+      - run: python -m pytest tests/unit -q
+
+  qgis:
+    name: QGIS integration (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["qgis/qgis:ltr", "qgis/qgis:stable"]
+    container: ${{ matrix.image }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QGISSI_PROFILE_DIR: /tmp/qgissi-profile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pytest
+        run: apt-get update -qq && apt-get install -y -qq python3-pytest
+      - name: QGIS version
+        run: scripts/qgis-python -c "from qgis.core import Qgis; print(Qgis.QGIS_VERSION)"
+      - name: Integration tests (tools, GUI, MCP, all benchmark checkers)
+        run: scripts/qgis-python -m pytest tests/qgis -q -o faulthandler_timeout=180
+      - name: Benchmark self-check (oracle must score 100%)
+        run: |
+          scripts/qgis-python -m qgissi.bench run --models oracle --out /tmp/bench --cache /tmp/qgissi-cache
+          grep -q '"passed": false' /tmp/bench/results.jsonl && exit 1 || true
+      - name: Package plugin
+        run: python3 scripts/package.py
+      - uses: actions/upload-artifact@v4
+        if: matrix.image == 'qgis/qgis:ltr'
+        with:
+          name: qgissi-plugin
+          path: dist/*.zip

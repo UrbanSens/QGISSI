@@ -475,7 +475,7 @@ def _area_points(ctx: ToolContext, layer_ref: str, where: str, max_points: int) 
        "threshold": {"type": "number", "description": "Optional: count days where the first variable exceeds this."},
        "daily": {"type": "boolean", "description": "Include the daily series (max 400 days)."},
        "max_points": {"type": "integer", "description": "Max sample points for areas (default 25)."}},
-      required=["start_date", "end_date"], risk=Risk.NETWORK, category="data", untrusted=True)
+      required=["start_date", "end_date"], risk=Risk.NETWORK, category="data", untrusted=True, tier="extended")
 def get_weather_history(ctx: ToolContext, start_date: str, end_date: str, lat: Optional[float] = None,
                         lon: Optional[float] = None, area_layer: str = "", where: str = "",
                         variables: Optional[List[str]] = None, model: str = "era5_land",
@@ -621,7 +621,7 @@ def create_layer(ctx: ToolContext, name: str, geometry_type: str, crs: str = "EP
        "features": {"type": "array", "items": {"type": "object"},
                     "description": "[{\"wkt\": \"POINT(x y)\", \"attributes\": {\"field\": value}}]"},
        "wkt_crs": {"type": "string", "description": "CRS of the WKT if different from the layer CRS."}},
-      required=["layer", "features"], risk=Risk.DESTRUCTIVE, category="editing")
+      required=["layer", "features"], risk=Risk.DESTRUCTIVE, category="editing", tier="extended")
 def add_features(ctx: ToolContext, layer: str, features: List[Dict[str, Any]], wkt_crs: str = "") -> Dict[str, Any]:
     lyr = resolve_vector(ctx, layer)
     feats = _features_from_specs(lyr, features, wkt_crs, ctx)

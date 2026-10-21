@@ -35,6 +35,8 @@ def cost_usd(model_id: str, usage: Usage, provider: str = "",
 def format_cost(value: Optional[float]) -> str:
     if value is None:
         return "n/a"
+    if value == 0:
+        return "$0.00"
     if value < 0.01:
         return f"${value:.4f}"
     return f"${value:.2f}"

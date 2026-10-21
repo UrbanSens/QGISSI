@@ -91,7 +91,7 @@ def _short_source(source: str) -> str:
 
 
 @tool("get_project_info", "Project-level information: title, file, CRS, ellipsoid, layer count, print layouts "
-      "and the current map view.", {}, category="project")
+      "and the current map view.", {}, category="project", tier="extended")
 def get_project_info(ctx: ToolContext) -> Dict[str, Any]:
     project = ctx.project
     info: Dict[str, Any] = {"title": project.title(), "file": project.fileName() or None,
@@ -108,7 +108,7 @@ def get_project_info(ctx: ToolContext) -> Dict[str, Any]:
 
 @tool("set_project_crs", "Set the project (map) CRS. Layers are reprojected on the fly; data is unchanged.",
       {"crs": {"type": "string", "description": "Authority id, e.g. EPSG:3857 or EPSG:25832."}},
-      required=["crs"], risk=Risk.WRITE, category="project")
+      required=["crs"], risk=Risk.WRITE, category="project", tier="extended")
 def set_project_crs(ctx: ToolContext, crs: str) -> str:
     target = parse_crs(crs)
     ctx.project.setCrs(target)
@@ -118,7 +118,7 @@ def set_project_crs(ctx: ToolContext, crs: str) -> str:
 @tool("rename_layer", "Rename a layer in the project.",
       {"layer": {"type": "string", "description": "Layer name or id."},
        "new_name": {"type": "string", "description": "New layer name."}},
-      required=["layer", "new_name"], risk=Risk.WRITE, category="project")
+      required=["layer", "new_name"], risk=Risk.WRITE, category="project", tier="extended")
 def rename_layer(ctx: ToolContext, layer: str, new_name: str) -> str:
     lyr = resolve_layer(ctx, layer)
     old = lyr.name()
@@ -129,7 +129,7 @@ def rename_layer(ctx: ToolContext, layer: str, new_name: str) -> str:
 @tool("set_layer_visibility", "Show or hide layers in the map.",
       {"layers": {"type": "array", "items": {"type": "string"}, "description": "Layer names or ids."},
        "visible": {"type": "boolean", "description": "true to show, false to hide."}},
-      required=["layers", "visible"], risk=Risk.WRITE, category="project")
+      required=["layers", "visible"], risk=Risk.WRITE, category="project", tier="extended")
 def set_layer_visibility(ctx: ToolContext, layers: List[str], visible: bool) -> str:
     root = ctx.project.layerTreeRoot()
     changed = []
@@ -144,7 +144,7 @@ def set_layer_visibility(ctx: ToolContext, layers: List[str], visible: bool) -> 
 
 @tool("remove_layer", "Remove a layer from the project (data on disk is not deleted; undo restores it).",
       {"layer": {"type": "string", "description": "Layer name or id."}},
-      required=["layer"], risk=Risk.DESTRUCTIVE, category="project")
+      required=["layer"], risk=Risk.DESTRUCTIVE, category="project", tier="extended")
 def remove_layer(ctx: ToolContext, layer: str) -> str:
     lyr = resolve_layer(ctx, layer)
     name = lyr.name()
@@ -192,7 +192,7 @@ def ask_user(ctx: ToolContext, question: str, options: Optional[List[str]] = Non
 
 @tool("save_project", "Save the QGIS project (to its current file, or to a new .qgz path).",
       {"path": {"type": "string", "description": "Optional new file path (.qgz/.qgs)."}},
-      risk=Risk.WRITE, category="project")
+      risk=Risk.WRITE, category="project", tier="extended")
 def save_project(ctx: ToolContext, path: str = "") -> str:
     import os
     target = os.path.expanduser(path) if path else ctx.project.fileName()

@@ -101,7 +101,7 @@ def png_base64(image: QImage) -> str:
     return base64.b64encode(bytes(data)).decode("ascii")
 
 
-@tool("get_map_view", "Current map view: extent, CRS and scale.", {}, category="map")
+@tool("get_map_view", "Current map view: extent, CRS and scale.", {}, category="map", tier="extended")
 def get_map_view(ctx: ToolContext) -> Dict[str, Any]:
     layers = _visible_layers(ctx)
     extent = _current_extent(ctx, layers) if layers else QgsRectangle()

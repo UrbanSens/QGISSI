@@ -11,6 +11,7 @@ from .base import (EventCallback, Message, ModelRequest, ModelResponse, Provider
 from .http import HttpClient, HttpError
 
 OLLAMA_BASE = "http://localhost:11434"
+DEFAULT_NUM_PREDICT = 8192
 
 
 class OllamaProvider(Provider):
@@ -82,8 +83,8 @@ class OllamaProvider(Provider):
             payload["tools"] = [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                                   "parameters": t.input_schema}}
                                 for t in sorted(request.tools, key=lambda s: s.name)]
-        if request.max_tokens:
-            payload["options"]["num_predict"] = request.max_tokens
+        # Bound every generation: small local models sometimes loop until the context is full.
+        payload["options"]["num_predict"] = request.max_tokens or DEFAULT_NUM_PREDICT
         if request.temperature is not None:
             payload["options"]["temperature"] = request.temperature
         if "thinking" in caps:
