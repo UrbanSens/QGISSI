@@ -3,7 +3,7 @@ import json
 
 from qgissi.core.agent import UNTRUSTED_NOTE, AgentConfig, AgentSession, ApprovalPolicy
 from qgissi.core.cancel import CancelToken
-from qgissi.providers.base import Message, ModelResponse, Usage
+from qgissi.providers.base import Message, ModelResponse, ProviderError, Usage
 from qgissi.tools.registry import Risk, ToolContext, ToolRegistry, ToolResult
 
 from .fakes import ScriptedProvider
@@ -151,3 +151,15 @@ def test_repeated_failures_get_a_hint():
     agent, _, _ = session(turns)
     run = agent.run_turn("go")
     assert "failed repeatedly" in run.tool_calls[-1].result or "failed repeatedly" in agent.history[-2].content[0]["content"][0]["text"]
+
+
+def test_provider_outages_are_told_apart_from_bad_requests():
+    agent, _, _ = session([ProviderError("Anthropic API error 400: Your credit balance is too low to access "
+                                         "the Anthropic API.", 400)])
+    run = agent.run_turn("hi")
+    assert run.status == "error" and run.provider_outage  # billing: says nothing about the model
+    agent, _, _ = session([ProviderError("Anthropic API error 400: prompt is too long", 400)])
+    run = agent.run_turn("hi")
+    assert run.status == "error" and not run.provider_outage
+    assert all(ProviderError("x", status).outage for status in (0, 401, 403, 404, 429, 529))
+    assert not ProviderError("x", 413).outage

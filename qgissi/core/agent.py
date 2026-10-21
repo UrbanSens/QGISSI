@@ -92,6 +92,7 @@ class RunResult:
     cost_usd: Optional[float] = 0.0
     wall_s: float = 0.0
     error: Optional[str] = None
+    provider_outage: bool = False  # failed on the account, service or network, not on the model
     refusal_category: Optional[str] = None
     fallback_used: bool = False
     served_models: List[str] = field(default_factory=list)
@@ -355,6 +356,7 @@ class AgentSession:
         except ProviderError as exc:
             run.status = "error"
             run.error = str(exc)
+            run.provider_outage = exc.outage
         except SystemExit as exc:  # never let model-written code end the host process
             run.status = "error"
             run.error = f"SystemExit: {exc}"

@@ -120,7 +120,7 @@ def cmd_run(args) -> int:
     from ..headless import start_qgis
     start_qgis()
     from .report import write_reports
-    from .runner import BenchConfig, make_target, run_suite
+    from .runner import BenchConfig, ProviderOutage, make_target, run_suite
     from .tasks import select_tasks
 
     tasks = select_tasks(args.tasks)
@@ -136,13 +136,21 @@ def cmd_run(args) -> int:
     out_dir = _out_dir(args, "qgissi")
     if not (args.resume and os.path.exists(os.path.join(out_dir, "meta.json"))):
         _write_meta(out_dir, args, "qgissi", len(tasks))
-    records = run_suite(tasks, targets, cfg, out_dir, args.cache, progress=lambda m: print(m, flush=True),
-                        resume=args.resume)
+    code = 0
+    try:
+        records = run_suite(tasks, targets, cfg, out_dir, args.cache, progress=lambda m: print(m, flush=True),
+                            resume=args.resume)
+    except ProviderOutage as exc:
+        print(f"Stopped, the model provider failed ({exc}). Nothing was recorded for that run; "
+              "continue with --resume once it works again.", flush=True)
+        records, code = exc.records, 4
+    if not records:
+        return code
     paths = write_reports(out_dir, records)
     with open(paths["markdown"], encoding="utf-8") as fh:
         print(fh.read())
     print(f"Reports: {paths['markdown']}  {paths['html']}")
-    return 0
+    return code
 
 
 def cmd_report(args) -> int:

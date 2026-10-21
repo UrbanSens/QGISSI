@@ -51,6 +51,8 @@ class ScriptedProvider(Provider):
     def complete(self, request, on_event=None, cancel=None):
         self.requests.append(request)
         turn = self.turns.pop(0)
+        if isinstance(turn, Exception):
+            raise turn
         if isinstance(turn, ModelResponse):
             return turn
         content, stop = turn

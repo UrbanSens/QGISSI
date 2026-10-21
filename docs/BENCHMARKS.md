@@ -119,7 +119,10 @@ once the recorded cost, judge calls included, reaches that amount.
 Model-written PyQGIS code can crash QGIS in native code; one GeoExpertQueries run died inside
 `QgsError.summary()`. Every tool call is therefore logged to `calls.jsonl` in the case's run folder
 before it runs, and `inflight.json` names the case in progress. `--resume --record-crash` scores that
-case as `crashed` (0, cost unknown) and carries on. `scripts/run-google-suite` does this automatically:
+case as `crashed` (0, cost unknown) and carries on. `scripts/run-google-suite` does this automatically.
+A failure of the model provider that says nothing about the model (authentication, billing, rate limits,
+server or network errors) is never scored: the run stops with exit status 4, records nothing for that
+case, and `--resume` continues once the provider works again. QGISSI-Bench runs behave the same way.
 
 ```bash
 scripts/run-google-suite geoktools --models anthropic/claude-opus-5-5@medium --accept-terms --out bench_runs/geoktools --budget 25

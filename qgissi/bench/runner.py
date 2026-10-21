@@ -186,6 +186,7 @@ def run_task(task: Task, target: ModelTarget, cfg: BenchConfig, fixture_dir: str
         "model_latency_s": round(sum(s.latency_s for s in run.steps), 2),
         "served_models": run.served_models, "fallback_used": run.fallback_used,
         "refusal_category": run.refusal_category, "final_text": (run.final_text or "")[:4000],
+        "provider_outage": run.provider_outage,
     }
     with open(os.path.join(work_dir, "transcript.json"), "w", encoding="utf-8") as fh:
         json.dump({"record": record, "system_prompt": session.system_prompt,
@@ -222,6 +223,8 @@ def run_suite(tasks: List[Task], targets: List[ModelTarget], cfg: BenchConfig, o
                     continue
                 work_dir = os.path.join(out_dir, "runs", target.slug, f"{task.id}_r{repeat}")
                 record = run_task(task, target, cfg, fixture_dir, work_dir, repeat)
+                if record["provider_outage"]:  # says nothing about the model: stop, record nothing
+                    raise ProviderOutage(records, f"{target.spec}: {record['error']}")
                 records.append(record)
                 with open(results_path, "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -230,6 +233,14 @@ def run_suite(tasks: List[Task], targets: List[ModelTarget], cfg: BenchConfig, o
                          f"status={record['status']:<9} steps={record['steps']:<2} cost={cost} {record['wall_s']:.0f}s"
                          + (f"  ({record['detail']})" if record["detail"] and record["score"] < 1 else ""))
     return records
+
+
+class ProviderOutage(RuntimeError):
+    """The model provider failed for reasons unrelated to the model (billing, auth, outage, network)."""
+
+    def __init__(self, records: List[Dict[str, Any]], message: str) -> None:
+        super().__init__(message)
+        self.records = records
 
 
 def load_records(out_dir: str) -> List[Dict[str, Any]]:

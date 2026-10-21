@@ -54,6 +54,8 @@ The development of QGISSI 0.1.0 (21 October 2026), recorded in order.
 | Live API check | Open-Meteo returns no precipitation for ERA5-Land | Per-variable fallback to ERA5, with provenance in the result |
 | Local-model baseline | Mistral produced an unbounded generation (958 s for one task) | Cap Ollama output (`num_predict`) |
 | Local-model baseline | Correct guesses with no tool calls earned credit; the injection task could be passed by doing nothing | Grounding rule; the injection task must summarise the real notes |
+| GeoExpertQueries pilot | Model-written PyQGIS code crashed QGIS inside `QgsError.summary()`, killing the whole run | Tool calls are logged before they run; the case in progress is scored as crashed and the run resumes |
+| First full Google-suite run | The API account ran out of credit, and the remaining 69 GeoKTools and ~18 GeoExpertQueries questions per model were scored 0 in minutes | Provider outages (auth, billing, rate limits, server and network errors) stop a run and record nothing; `--resume` continues |
 
 ## 4. Independent code review
 
@@ -73,7 +75,7 @@ before the merge to `main`. All are fixed and each has a regression test:
 
 ## 5. Verification
 
-- **Unit tests:** 108 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
+- **Unit tests:** 109 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
   silent stream at once. They cover provider payloads and stream parsing (Anthropic,
   OpenAI, Gemini, Ollama), agent-loop semantics, registry coercion, the code guard, scrubbing, pricing,
   Markdown, and scorer parity with all 30 upstream test vectors. They pass on Python 3.9 and 3.12.

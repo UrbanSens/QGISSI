@@ -61,7 +61,7 @@ def run_geoktools(args) -> int:
     paths = {spec: os.path.join(out_dir, f"rows_{t.slug}.jsonl") for spec, t in targets.items()}
     done = {spec: load_rows(paths[spec]) if args.resume else {} for spec in models}
     spent = sum(row_cost(r) for rows in done.values() for r in rows.values())
-    stopped = False
+    stopped, halted = False, ""
     with contextlib.ExitStack() as stack:
         files = {spec: stack.enter_context(open_rows(paths[spec], args.resume)) for spec in models}
         died = take_inflight(out_dir)
@@ -83,6 +83,10 @@ def run_geoktools(args) -> int:
                 work_dir = os.path.join(out_dir, "runs", target.slug, case["query_id"])
                 mark_inflight(out_dir, spec, case["query_id"])
                 run, _session = run_query(target, case["query"], args, work_dir)
+                if run.provider_outage:  # says nothing about the model: stop, record nothing
+                    clear_inflight(out_dir)
+                    halted = f"{spec}: {run.error}"
+                    break
                 response, extracted = extract_answer_list(run.final_text, case["query"].count("__"))
                 answer = response if response is not None else (run.final_text or "")
                 score = score_structured_answer(case["golden_answer_raw"], answer)  # golds are read only here
@@ -97,6 +101,10 @@ def run_geoktools(args) -> int:
             if stopped:
                 print(f"Budget ${args.budget:.2f} reached (${spent:.2f} recorded); stopping. "
                       "Continue with --resume and a higher --budget.")
+                break
+            if halted:
+                print(f"Stopped, the model provider failed ({halted}). Nothing was recorded for that case; "
+                      "continue with --resume once it works again.", flush=True)
                 break
     summaries: Dict[str, Any] = {}
     for spec, target in targets.items():
@@ -137,7 +145,10 @@ def run_geoktools(args) -> int:
                   + "; each is scored 0."]
     if stopped:
         lines += ["", f"Stopped early by the ${args.budget:.2f} budget: scores cover only the recorded cases."]
+    if halted:
+        lines += ["", f"Stopped early because the model provider failed ({halted}): scores cover only the "
+                      "recorded cases."]
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     print("\n".join(lines))
-    return 3 if stopped else 0
+    return 4 if halted else 3 if stopped else 0

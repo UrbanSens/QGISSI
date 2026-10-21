@@ -140,11 +140,21 @@ class StreamEvent:
 EventCallback = Callable[[StreamEvent], None]
 
 
+# Failures that say nothing about the request or the model: authentication, billing, an unknown
+# model, rate limits, server outages and network or configuration errors (status 0).
+OUTAGE_STATUS = {0, 401, 402, 403, 404, 408, 429, 500, 502, 503, 504, 520, 522, 524, 529}
+
+
 class ProviderError(Exception):
     def __init__(self, message: str, status: int = 0, retryable: bool = False) -> None:
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+
+    @property
+    def outage(self) -> bool:
+        """The account, service or connection is unusable, rather than this request being bad."""
+        return self.status in OUTAGE_STATUS or "credit balance" in str(self).lower()
 
 
 class Provider:

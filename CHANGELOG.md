@@ -8,10 +8,13 @@
   per query, and judge costs are recorded and reported.
 - **Crash-tolerant runs**: every tool call is logged before it runs, and `--record-crash` scores a case
   during which QGIS crashed as a failure. `scripts/run-google-suite` restarts the run after a crash.
+- **Provider outages are not scored**: authentication, billing, rate-limit, server and network failures
+  stop a benchmark run (exit status 4) instead of being counted as wrong answers.
+- **Chart**: `scripts/plot_google_benchmarks.py` draws the Google-suite results with the UrbanSens logo.
 - **Cost estimate**: `--dry-run` is recalibrated on the measured runs; it was about 12 times too high.
 - **Nominatim**: the one-request-per-second limit now holds across processes (POSIX).
 - **Docs**: the code tripwire's blind spot for native code (GDAL `/vsicurl/`, Qt) is documented.
-- **Quality**: 108 unit tests.
+- **Quality**: 109 unit tests.
 
 ## 0.1.0 (2026-10-21)
 

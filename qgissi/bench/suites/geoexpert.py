@@ -13,6 +13,7 @@ import json
 import os
 from typing import Dict, List
 
+from ...providers.base import ProviderError
 from ..scoring import NORMALIZED, mean, parse_rating, render_autorater_prompt
 from .georeason import fetch, load_cases
 from .rows import (append_row, clear_inflight, crashed_record, load_rows, mark_inflight, open_rows, row_cost,
@@ -85,7 +86,7 @@ def run_geoexpert(args) -> int:
     paths = {spec: os.path.join(out_dir, f"rows_{t.slug}.jsonl") for spec, t in targets.items()}
     done = {spec: load_rows(paths[spec]) if args.resume else {} for spec in models}
     spent = sum(row_cost(r) for rows in done.values() for r in rows.values())
-    stopped = False
+    stopped, halted = False, ""
     with contextlib.ExitStack() as stack:
         files = {spec: stack.enter_context(open_rows(paths[spec], args.resume)) for spec in models}
         died = take_inflight(out_dir)
@@ -107,6 +108,10 @@ def run_geoexpert(args) -> int:
                 work_dir = os.path.join(out_dir, "runs", target.slug, case["query_id"])
                 mark_inflight(out_dir, spec, case["query_id"])
                 run, session = run_query(target, case["query"], args, work_dir)
+                if run.provider_outage:  # says nothing about the model: stop, record nothing
+                    clear_inflight(out_dir)
+                    halted = f"{spec}: {run.error}"
+                    break
                 trace = condense_trace(session, run, spec)
                 prompt = render_autorater_prompt(template, case, trace, True, manifest)
                 ratings, judge_cost = [], 0.0
@@ -116,8 +121,16 @@ def run_geoexpert(args) -> int:
                         judge_cost += cost or 0.0
                         rating = parse_rating(reply)
                         ratings.append({"rating": rating, "normalized": NORMALIZED.get(rating, 0.0), "reply": reply[-600:]})
+                    except ProviderError as exc:
+                        if exc.outage:
+                            halted = f"judge {args.judge}: {exc}"
+                            break
+                        ratings.append({"rating": None, "normalized": 0.0, "error": str(exc)})
                     except Exception as exc:
                         ratings.append({"rating": None, "normalized": 0.0, "error": str(exc)})
+                if halted:
+                    clear_inflight(out_dir)
+                    break
                 score = mean(r["normalized"] for r in ratings)
                 row = {"query_id": case["query_id"], "domain_cluster": case["domain_cluster"],
                        "solvability": case["solvability"], "score": round(score, 4), "runs": ratings,
@@ -131,6 +144,10 @@ def run_geoexpert(args) -> int:
             if stopped:
                 print(f"Budget ${args.budget:.2f} reached (${spent:.2f} recorded); stopping. "
                       "Continue with --resume and a higher --budget.")
+                break
+            if halted:
+                print(f"Stopped, the model provider failed ({halted}). Nothing was recorded for that case; "
+                      "continue with --resume once it works again.", flush=True)
                 break
     table: List[str] = []
     crashes: Dict[str, int] = {}
@@ -180,7 +197,10 @@ def run_geoexpert(args) -> int:
                   + "; each is scored 0."]
     if stopped:
         lines += ["", f"Stopped early by the ${args.budget:.2f} budget: scores cover only the recorded cases."]
+    if halted:
+        lines += ["", f"Stopped early because the model provider failed ({halted}): scores cover only the "
+                      "recorded cases."]
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
     print("\n".join(lines))
-    return 3 if stopped else 0
+    return 4 if halted else 3 if stopped else 0
