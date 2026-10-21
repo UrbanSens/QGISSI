@@ -16,6 +16,22 @@ LAYER_TYPES = {"source", "vector", "raster", "layer", "mesh", "pointcloud", "ann
 DESTINATION_TYPES = {"sink", "vectorDestination", "rasterDestination", "fileDestination", "folderDestination",
                      "pointCloudDestination", "vectorTileDestination"}
 PREFERRED_PROVIDERS = {"native": 3, "qgis": 2, "gdal": 1}
+# Algorithms that modify existing data in place: truncation, arbitrary SQL, shapefile repair, and
+# imports that can overwrite database tables. Ids verified against QGIS 3.36's registry.
+IN_PLACE_ALGORITHMS = {
+    "native:truncatetable", "native:repairshapefile", "native:setlayerencoding",
+    "native:postgisexecutesql", "qgis:postgisexecutesql", "qgis:postgisexecuteandloadsql",
+    "native:spatialiteexecutesql", "native:spatialiteexecutesqlregistered", "qgis:spatialiteexecutesql",
+    "native:importintopostgis", "qgis:importintospatialite",
+    "gdal:importvectorintopostgisdatabaseavailableconnections", "gdal:importvectorintopostgisdatabasenewconnection",
+}
+
+
+def processing_risk(args: Dict[str, Any]) -> str:
+    """Destructive when the algorithm edits its input in place or the call overwrites files."""
+    if str(args.get("algorithm_id", "")).strip().lower() in IN_PLACE_ALGORITHMS or args.get("overwrite"):
+        return Risk.DESTRUCTIVE
+    return Risk.WRITE
 
 
 def _as_int(flags: Any) -> int:
@@ -207,7 +223,8 @@ def _resolve_layer_value(ctx: ToolContext, value: Any) -> Any:
     return value
 
 
-def _prepare(ctx: ToolContext, alg, parameters: Dict[str, Any], allow_geographic_distance: bool) -> Dict[str, Any]:
+def _prepare(ctx: ToolContext, alg, parameters: Dict[str, Any], allow_geographic_distance: bool,
+             overwrite: bool = False) -> Dict[str, Any]:
     definitions = {p.name(): p for p in alg.parameterDefinitions()}
     lowered = {name.lower(): name for name in definitions}
     prepared: Dict[str, Any] = {}
@@ -237,9 +254,14 @@ def _prepare(ctx: ToolContext, alg, parameters: Dict[str, Any], allow_geographic
         elif ptype == "enum":
             prepared[name] = _enum_value(param, value)
         elif ptype in DESTINATION_TYPES and isinstance(value, str) and value.upper() != "TEMPORARY_OUTPUT":
+            path = value
             if not os.path.isabs(value) and ctx.output_dir:
                 os.makedirs(ctx.output_dir, exist_ok=True)
-                prepared[name] = os.path.join(ctx.output_dir, value)
+                path = os.path.join(ctx.output_dir, value)
+            if os.path.exists(path.split("|")[0]) and not overwrite and ptype != "folderDestination":
+                raise ToolError(f"Not run: output '{path}' already exists and would be overwritten. Use another "
+                                "file name, or pass overwrite=true if replacing it is intended.")
+            prepared[name] = path
     for name, param in definitions.items():  # second pass: needs resolved layers
         value = prepared.get(name)
         if value is None:
@@ -316,15 +338,16 @@ def _layer_summary(layer: QgsMapLayer) -> Dict[str, Any]:
        "output_name": {"type": "string", "description": "Name for the main output layer (recommended)."},
        "load_outputs": {"type": "boolean", "description": "Add layer outputs to the project (default true)."},
        "allow_geographic_distance": {"type": "boolean",
-                                     "description": "Permit distance parameters in degrees (default false)."}},
-      required=["algorithm_id", "parameters"], risk=Risk.WRITE, category="processing")
+                                     "description": "Permit distance parameters in degrees (default false)."},
+       "overwrite": {"type": "boolean", "description": "Allow replacing existing output files (needs approval)."}},
+      required=["algorithm_id", "parameters"], risk=Risk.WRITE, category="processing", risk_fn=processing_risk)
 def run_processing_algorithm(ctx: ToolContext, algorithm_id: str, parameters: Dict[str, Any],
                              output_name: str = "", load_outputs: bool = True,
-                             allow_geographic_distance: bool = False) -> ToolResult:
+                             allow_geographic_distance: bool = False, overwrite: bool = False) -> ToolResult:
     import processing  # noqa: deferred so tool registration works without the Processing plugin
 
     alg = _get_algorithm(algorithm_id)
-    prepared = _prepare(ctx, alg, parameters or {}, allow_geographic_distance)
+    prepared = _prepare(ctx, alg, parameters or {}, allow_geographic_distance, overwrite)
     context = QgsProcessingContext()
     context.setProject(ctx.project)
     feedback = _Feedback(ctx)

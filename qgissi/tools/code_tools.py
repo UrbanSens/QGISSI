@@ -30,7 +30,12 @@ from .registry import Risk, ToolContext, ToolError, ToolResult, tool
 
 CODE_FILENAME = "<qgissi-code>"
 DEFAULT_TIMEOUT = 120.0
-_ALLOWED_BINARIES = ("gdal", "ogr", "grass", "saga", "otb", "whitebox", "pdal", "python")
+_ALLOWED_BINARIES = ("gdal", "ogr", "grass", "saga", "otb", "whitebox", "pdal", "nearblack")
+_SHELLS = {"sh", "bash", "zsh", "dash", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh"}
+_SHELL_OPERATORS = {"|", "||", "&", "&&", ";", ">", ">>", "<", "<<", "<&", ">&", "(", ")"}
+_PATH_EVENTS = {"os.remove", "os.rmdir", "os.truncate", "os.chmod", "os.chown", "os.utime", "os.mkdir",
+                "os.symlink", "shutil.rmtree", "shutil.chown"}
+_TWO_PATH_EVENTS = {"os.rename", "os.replace", "os.link", "shutil.move"}
 _state = threading.local()
 _hook_installed = False
 
@@ -52,6 +57,28 @@ def _allowed_path(path: Any) -> bool:
     return any(target == root or target.startswith(root + os.sep) for root in roots)
 
 
+def _program(args: Any) -> str:
+    """Name of the program a subprocess.Popen call would run ('' if it is a chained shell command)."""
+    import shlex
+    executable, argv = args[0], args[1]
+    seq = [str(a) for a in argv] if isinstance(argv, (list, tuple)) else [str(argv)]
+    program = os.path.basename(str(executable or (seq[0] if seq else ""))).lower()
+    if program not in _SHELLS:
+        return program
+    command = seq[seq.index("-c") + 1] if "-c" in seq and seq.index("-c") + 1 < len(seq) else (seq[-1] if seq else "")
+    if "`" in command or "$(" in command:
+        return ""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return ""
+    if not tokens or any(t in _SHELL_OPERATORS for t in tokens):
+        return ""
+    return os.path.basename(tokens[0]).lower()
+
+
 def _audit(event: str, args: Any) -> None:
     if not _armed():
         return
@@ -63,13 +90,20 @@ def _audit(event: str, args: Any) -> None:
             flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND))
         if writes and path is not None and not _allowed_path(path):
             raise TripwireError(f"writing to {path} is outside the output folder")
-    elif event in ("os.remove", "os.unlink", "os.rmdir", "shutil.rmtree", "os.rename", "os.replace"):
-        if not _allowed_path(args[0]):
-            raise TripwireError(f"{event} on {args[0]} is not allowed")
+    elif event in _PATH_EVENTS:
+        target = args[1] if event == "os.symlink" else args[0]  # a symlink is created at its second argument
+        if not _allowed_path(target):
+            raise TripwireError(f"{event} on {target} is outside the output folder")
+    elif event in _TWO_PATH_EVENTS:
+        for target in args[:2]:
+            if not _allowed_path(target):
+                raise TripwireError(f"{event} involving {target} is outside the output folder")
     elif event == "subprocess.Popen":
-        program = os.path.basename(str(args[0] or (args[1][0] if args[1] else ""))).lower()
-        if not program.startswith(_ALLOWED_BINARIES):
-            raise TripwireError(f"starting the process '{program}' is not allowed")
+        program = _program(args)
+        if not program or not program.startswith(_ALLOWED_BINARIES):
+            raise TripwireError(f"starting the process '{program or 'chained shell command'}' is not allowed")
+    elif event == "_thread.start_new_thread":
+        raise TripwireError("starting threads is not allowed in agent code")
     elif event in ("os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty", "os.kill",
                    "ctypes.dlopen", "ctypes.dlsym", "ctypes.call_function", "socket.connect", "socket.bind",
                    "socket.sendto", "winreg.OpenKey"):
@@ -80,10 +114,32 @@ def _audit(event: str, args: Any) -> None:
             raise TripwireError(f"import of {name} is not allowed")
 
 
+def _guard_thread_start() -> None:
+    """Python < 3.10 raises no audit event when a thread starts, so wrap the primitive instead.
+
+    The wrapper only refuses while agent code is running on the calling thread.
+    """
+    import _thread
+    import threading
+
+    original = _thread.start_new_thread
+
+    def guarded(function, args, kwargs=None):
+        if _armed():
+            raise TripwireError("starting threads is not allowed in agent code")
+        return original(function, args) if kwargs is None else original(function, args, kwargs)
+
+    _thread.start_new_thread = guarded
+    if getattr(threading, "_start_new_thread", None) is original:
+        threading._start_new_thread = guarded
+
+
 def _install_hook() -> None:
     global _hook_installed
     if not _hook_installed and hasattr(sys, "addaudithook"):
         sys.addaudithook(_audit)  # permanent by design; inert unless armed on this thread
+        if sys.version_info < (3, 10):
+            _guard_thread_start()
         _hook_installed = True
 
 
@@ -165,6 +221,8 @@ def run_pyqgis(ctx: ToolContext, code: str, purpose: str, timeout_s: int = int(D
     if not report.ok:
         raise ToolError(report.message())
     created: List[str] = []
+    if ctx.output_dir:
+        os.makedirs(ctx.output_dir, exist_ok=True)
     namespace = _namespace(ctx, created)
     before = set(ctx.project.mapLayers())
     stdout = io.StringIO()
@@ -175,9 +233,9 @@ def run_pyqgis(ctx: ToolContext, code: str, purpose: str, timeout_s: int = int(D
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout), \
                 _guarded(ctx, max(5.0, min(float(timeout_s), 600.0))):
             exec(compiled, namespace)  # noqa: S102 - guarded execution of approved code
-    except CancelledError:
+    except (CancelledError, KeyboardInterrupt):
         raise
-    except Exception as exc:  # report the line inside the snippet
+    except BaseException as exc:  # incl. SystemExit, which would otherwise close QGIS
         frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename == CODE_FILENAME]
         where = f" (line {frames[-1].lineno}: {frames[-1].line})" if frames else ""
         error = f"{type(exc).__name__}: {exc}{where}"

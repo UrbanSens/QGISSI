@@ -179,7 +179,7 @@ def move_layers_to_group(ctx: ToolContext, layers: List[str], group: str) -> str
       "ambiguous in a way that changes the result; offer concrete options when possible.",
       {"question": {"type": "string", "description": "The question."},
        "options": {"type": "array", "items": {"type": "string"}, "description": "Suggested answers (optional)."}},
-      required=["question"], category="assistant")
+      required=["question"], category="assistant", main_thread=False)
 def ask_user(ctx: ToolContext, question: str, options: Optional[List[str]] = None) -> ToolResult:
     if ctx.ask_user is None:
         return ToolResult(text="No user is available to answer. Proceed with the most reasonable assumption "

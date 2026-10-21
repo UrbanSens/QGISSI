@@ -203,12 +203,22 @@ class AnthropicProvider(Provider):
             raise ProviderError("No Anthropic API key configured (Settings > QGISSI or ANTHROPIC_API_KEY).")
         url = f"{self.base_url}/v1/messages"
         attempts = 0
+        streamed = [False]
+
+        def forward(event: StreamEvent) -> None:
+            streamed[0] = True
+            if on_event is not None:
+                on_event(event)
+
         while True:
             payload, betas = self.build_payload(request)
             started = time.time()
+            if streamed[0] and on_event is not None:  # a retry: the UI must discard the partial output
+                on_event(StreamEvent("reset"))
+                streamed[0] = False
             try:
                 if request.stream:
-                    response = self._stream(url, payload, betas, on_event, cancel)
+                    response = self._stream(url, payload, betas, forward, cancel)
                 else:
                     data = self.http.post_json(url, payload, self._headers(betas), cancel)
                     response = self._parse_message(data)

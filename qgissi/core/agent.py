@@ -119,16 +119,20 @@ class ApprovalPolicy:
         self.ask_fn = ask_fn
         self.always_allowed: set = set()
 
-    def needs_approval(self, definition: ToolDef) -> bool:
+    def needs_approval(self, definition: ToolDef, risk: Optional[str] = None) -> bool:
+        risk = risk or definition.risk
         if self.mode == "autopilot":
             return False
         if self.mode == "ask_all":
-            return definition.risk != Risk.READ
-        return definition.risk in (Risk.DESTRUCTIVE, Risk.CODE)
+            return risk != Risk.READ
+        return risk in (Risk.DESTRUCTIVE, Risk.CODE)
 
-    def check(self, definition: ToolDef, args: Dict[str, Any]) -> Tuple[bool, Optional[bool]]:
+    def check(self, definition: ToolDef, args: Dict[str, Any],
+              risk: Optional[str] = None) -> Tuple[bool, Optional[bool]]:
         """Returns (allowed, asked_and_answered)."""
-        if not self.needs_approval(definition) or definition.name in self.always_allowed:
+        risk = risk or definition.effective_risk(args)
+        always = definition.name in self.always_allowed and risk == definition.risk
+        if not self.needs_approval(definition, risk) or always:
             return True, None
         if self.ask_fn is None:
             return False, False
@@ -180,6 +184,8 @@ class AgentSession:
             self.emit("thinking_delta", {"text": event.text})
         elif event.kind == "tool_start":
             self.emit("tool_start", {"name": event.name})
+        elif event.kind == "reset":
+            self.emit("stream_reset", {})
 
     def _append_user(self, blocks: List[Dict[str, Any]]) -> None:
         # Consecutive user content is merged into the trailing user message; this
@@ -208,8 +214,8 @@ class AgentSession:
         name = call.get("name", "")
         args = call.get("input") or {}
         definition = self.registry.get(name) if name in self.tool_names else None
-        self.emit("tool_call", {"id": call.get("id"), "name": name, "input": args,
-                                "risk": definition.risk if definition else None})
+        risk = definition.effective_risk(args) if definition else None
+        self.emit("tool_call", {"id": call.get("id"), "name": name, "input": args, "risk": risk})
         started = time.time()
         approved: Optional[bool] = None
         if call.get("id") in invalid:
@@ -218,16 +224,19 @@ class AgentSession:
             result = ToolResult(text=f"Unknown tool '{name}'. Available tools: {', '.join(sorted(self.tool_names))}.",
                                 is_error=True)
         else:
-            allowed, approved = self.approval.check(definition, args)
+            allowed, approved = self.approval.check(definition, args, risk)
             if not allowed:
                 reason = ("the user denied it" if approved is False and self.approval.ask_fn
                           else "it needs approval and no user is available")
                 result = ToolResult(text=f"Not executed: {reason}. Do not retry the same action; "
                                          "continue with another approach or explain what is needed.", is_error=True)
             else:
-                if ctx.checkpoint is not None and definition.risk in (Risk.WRITE, Risk.DESTRUCTIVE, Risk.CODE):
-                    self.executor.run(lambda: ctx.checkpoint.before_change(definition, args))
-                result = self.executor.run(lambda: self.registry.invoke(definition, args, ctx))
+                if ctx.checkpoint is not None and risk != Risk.READ:
+                    self.executor.run(lambda: ctx.checkpoint.before_change(definition, args, risk))
+                if definition.main_thread:
+                    result = self.executor.run(lambda: self.registry.invoke(definition, args, ctx))
+                else:  # e.g. ask_user: blocks on the user, must not run on the GUI thread
+                    result = self.registry.invoke(definition, args, ctx)
         key = f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
         if result.is_error:
             self._failures[key] = self._failures.get(key, 0) + 1
@@ -346,6 +355,11 @@ class AgentSession:
         except ProviderError as exc:
             run.status = "error"
             run.error = str(exc)
+        except SystemExit as exc:  # never let model-written code end the host process
+            run.status = "error"
+            run.error = f"SystemExit: {exc}"
+            if self.history and self.history[-1].role == "assistant":
+                self._close_pending(self.history[-1], "Not executed: SystemExit is not allowed.")
         except Exception as exc:  # keep the session usable after unexpected failures
             run.status = "error"
             run.error = f"{type(exc).__name__}: {exc}"

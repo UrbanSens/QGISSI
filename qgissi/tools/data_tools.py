@@ -647,7 +647,7 @@ _FORMATS = {"gpkg": ("GPKG", ".gpkg"), "geojson": ("GeoJSON", ".geojson"), "shap
        "crs": {"type": "string", "description": "Optional target CRS."},
        "selected_only": {"type": "boolean"},
        "overwrite": {"type": "boolean"}},
-      required=["layer", "filename"], risk=Risk.WRITE, category="data")
+      required=["layer", "filename"], risk=Risk.WRITE, category="data", risk_fn=lambda args: Risk.DESTRUCTIVE if args.get("overwrite") else Risk.WRITE)
 def export_layer(ctx: ToolContext, layer: str, filename: str, format: str = "gpkg", crs: str = "",  # noqa: A002
                  selected_only: bool = False, overwrite: bool = False) -> Dict[str, Any]:
     lyr = resolve_layer(ctx, layer)

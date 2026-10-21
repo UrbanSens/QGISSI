@@ -87,6 +87,17 @@ class ToolDef:
     tier: str = "core"
     requires_gui: bool = False
     untrusted: bool = False      # output may contain third-party text (prompt-injection surface)
+    main_thread: bool = True     # False for tools that never touch QGIS objects (e.g. ask_user)
+    risk_fn: Optional[Callable[[Dict[str, Any]], str]] = None  # risk of a specific call, if higher
+
+    def effective_risk(self, args: Optional[Dict[str, Any]] = None) -> str:
+        if self.risk_fn is None:
+            return self.risk
+        try:
+            dynamic = self.risk_fn(args or {})
+        except Exception:
+            dynamic = Risk.DESTRUCTIVE  # fail closed
+        return max((self.risk, dynamic), key=Risk.ORDER.index)
 
     def annotations(self) -> Dict[str, Any]:
         """MCP-style behaviour hints derived from the risk level."""
@@ -120,11 +131,13 @@ class ToolRegistry:
 
     def tool(self, name: str, description: str, parameters: Optional[Dict[str, Any]] = None,
              required: Optional[List[str]] = None, risk: str = Risk.READ, category: str = "general",
-             tier: str = "core", requires_gui: bool = False, untrusted: bool = False):
+             tier: str = "core", requires_gui: bool = False, untrusted: bool = False,
+             main_thread: bool = True, risk_fn: Optional[Callable[[Dict[str, Any]], str]] = None):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.add(ToolDef(name=name, description=" ".join(description.split()), func=func,
                              parameters=parameters or {}, required=required or [], risk=risk,
-                             category=category, tier=tier, requires_gui=requires_gui, untrusted=untrusted))
+                             category=category, tier=tier, requires_gui=requires_gui, untrusted=untrusted,
+                             main_thread=main_thread, risk_fn=risk_fn))
             return func
         return decorator
 
@@ -249,7 +262,9 @@ class ToolRegistry:
             raise
         except ToolError as exc:
             return ToolResult(text=str(exc), is_error=True)
-        except Exception as exc:  # report the failing line so the model can adapt
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:  # incl. SystemExit: a tool must never take QGIS down
             frames = traceback.extract_tb(exc.__traceback__)
             where = f" (at {frames[-1].name}:{frames[-1].lineno})" if frames else ""
             return ToolResult(text=f"{type(exc).__name__}: {exc}{where}", is_error=True)

@@ -32,6 +32,7 @@ from .markdown import to_html
 from .worker import AgentWorker, MainThreadExecutor, UserPrompter
 
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+_ORPHANED_WORKERS: List[AgentWorker] = []  # still running at unload; destroying a running QThread aborts
 APPROVAL_MODES = [("ask_risky", "Balanced: ask before edits & code"), ("ask_all", "Ask before every change"),
                   ("autopilot", "Autopilot: never ask")]
 RISK_LABELS = {Risk.READ: "reads data", Risk.NETWORK: "contacts a web service", Risk.WRITE: "changes the project",
@@ -225,6 +226,7 @@ class ChatDock(QDockWidget):
         self.prompter.cancel = self.cancel
         self._current_checkpoint = RunCheckpoint(QgsProject.instance(), self.settings.backup_dir(),
                                                  time.strftime("%Y%m%d-%H%M%S"))
+        self._current_checkpoint.begin()  # the run's baseline, taken before anything can change
         self._add("user", text=text, images=len(images))
         self.worker = AgentWorker(session, text, images, self.cancel, self)
         self.worker.event.connect(self._on_event)
@@ -273,6 +275,9 @@ class ChatDock(QDockWidget):
             else:
                 self.session_cost += record.cost_usd
             self._update_cost()
+        elif kind == "stream_reset":  # the provider retries the request: drop its partial output
+            while self.entries and self.entries[-1].get("open") and self.entries[-1]["kind"] in ("assistant", "thinking"):
+                self.entries.pop()
         elif kind == "status":
             self.status.setText(str(payload.get("text", ""))[:120])
         self._schedule_render()
@@ -283,8 +288,7 @@ class ChatDock(QDockWidget):
 
     def _on_finished(self, result: RunResult) -> None:
         self._close_open()
-        if self._current_checkpoint is not None and self._current_checkpoint.has_changes:
-            self.checkpoints.append(self._current_checkpoint)
+        self._record_checkpoint()
         summary = (f"{len(result.steps)} step(s) · {len(result.tool_calls)} tool call(s) · "
                    f"{format_cost(result.cost_usd)} · {result.wall_s:.0f}s")
         if result.status == "completed":
@@ -303,8 +307,16 @@ class ChatDock(QDockWidget):
         self._finish_ui()
 
     def _on_failed(self, message: str) -> None:
+        self._record_checkpoint()
         self._add("error", text=message, defer=True)
         self._finish_ui()
+
+    def _record_checkpoint(self) -> None:
+        checkpoint, self._current_checkpoint = self._current_checkpoint, None
+        if checkpoint is not None:
+            checkpoint.finish()
+            if checkpoint.has_changes:
+                self.checkpoints.append(checkpoint)
 
     def _finish_ui(self) -> None:
         self.send_button.setText("Send")
@@ -503,8 +515,11 @@ class ChatDock(QDockWidget):
     def shutdown(self) -> None:
         if self.cancel is not None:
             self.cancel.cancel("QGIS is closing")
-        if self.worker is not None:
-            self.worker.wait(3000)
+        worker = self.worker
+        if worker is not None and worker.isRunning() and not worker.wait(5000):
+            worker.setParent(None)
+            _ORPHANED_WORKERS.append(worker)
+            worker.finished.connect(lambda w=worker: _ORPHANED_WORKERS.remove(w) if w in _ORPHANED_WORKERS else None)
 
 
 def _arg_summary(name: str, args: Dict[str, Any]) -> str:

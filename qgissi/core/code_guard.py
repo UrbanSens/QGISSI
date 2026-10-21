@@ -16,6 +16,7 @@ BLOCKED_MODULES = {
     "subprocess", "socket", "ctypes", "multiprocessing", "pty", "signal", "winreg", "_winapi",
     "http.server", "socketserver", "smtplib", "ftplib", "telnetlib", "paramiko", "pexpect",
     "importlib", "imp", "runpy", "code", "codeop", "marshal", "pickle", "shelve",
+    "threading", "_thread", "concurrent", "asyncio",
 }
 BLOCKED_CALLS = {
     "eval", "exec", "compile", "__import__", "breakpoint", "input", "exit", "quit",
@@ -99,8 +100,15 @@ def check_code(source: str) -> GuardReport:
                 if attr in ("write_text", "write_bytes", "to_file", "writeAsVectorFormat",
                             "writeAsVectorFormatV2", "writeAsVectorFormatV3"):
                     report.writes_files = True
+        elif isinstance(node, ast.Raise) and node.exc is not None:
+            raised = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+            if isinstance(raised, ast.Name) and raised.id in ("SystemExit", "KeyboardInterrupt", "GeneratorExit"):
+                report.problems.append(f"raising {raised.id} would stop QGIS; report the problem with print() "
+                                       "or raise a normal exception instead")
         elif isinstance(node, ast.Attribute) and node.attr in BLOCKED_DUNDERS:
             report.problems.append(f"access to '{node.attr}' is not allowed")
+        elif isinstance(node, ast.Attribute) and node.attr == "modules" and _dotted(node) == "sys.modules":
+            report.problems.append("access to sys.modules is not allowed")
         elif isinstance(node, ast.Name) and node.id in ("__builtins__", "__loader__"):
             report.problems.append(f"access to '{node.id}' is not allowed")
     report.ok = not report.problems

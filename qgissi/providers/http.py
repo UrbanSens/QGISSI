@@ -170,15 +170,25 @@ class HttpClient:
             except Exception:
                 pass
 
+        def _abort() -> None:
+            # Called from another thread (Stop button). Closing the response there would block on
+            # the reader's buffer lock; shutting the socket down wakes the blocked read at once.
+            sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+            try:
+                if sock is not None:
+                    sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
         if cancel is not None:
-            cancel.register(_close)
+            cancel.register(_abort)
         try:
             while True:
                 if cancel is not None:
                     cancel.raise_if_cancelled()
                 try:
                     line = response.readline()
-                except (socket.timeout, ConnectionError, ValueError, OSError) as exc:
+                except (socket.timeout, ConnectionError, ValueError, OSError, AttributeError) as exc:
                     if cancel is not None and cancel.cancelled:
                         raise CancelledError(cancel.reason)
                     raise HttpError(0, f"Stream interrupted: {exc}")
@@ -189,7 +199,7 @@ class HttpClient:
                 yield line.decode("utf-8", "replace").rstrip("\r\n")
         finally:
             if cancel is not None:
-                cancel.unregister(_close)
+                cancel.unregister(_abort)
             _close()
 
     def stream_sse(self, url: str, payload: Any, headers: Optional[Dict[str, str]] = None,
