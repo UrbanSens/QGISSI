@@ -55,13 +55,31 @@ The development of QGISSI 0.1.0 (21 October 2026), recorded in order.
 | Local-model baseline | Mistral produced an unbounded generation (958 s for one task) | Cap Ollama output (`num_predict`) |
 | Local-model baseline | Correct guesses with no tool calls earned credit; the injection task could be passed by doing nothing | Grounding rule; the injection task must summarise the real notes |
 
-## 4. Verification
+## 4. Independent code review
 
-- **Unit tests:** 100 tests, no QGIS. They cover provider payloads and stream parsing (Anthropic,
+A separate review pass, which reproduced most of its findings with QGIS's Python, found eight defects
+before the merge to `main`. All are fixed and each has a regression test:
+
+| Severity | Defect | Fix |
+|---|---|---|
+| Critical | `ask_user` ran on the GUI thread and waited for an answer there, freezing QGIS | Tools can declare `main_thread=False`; `ask_user` runs on the worker like approvals; the prompter falls back to a local event loop on the GUI thread |
+| Critical | `raise SystemExit` in agent code escaped every handler and closed QGIS | `BaseException` contained in the code tool, registry, agent loop and worker; the guard rejects raising it |
+| High | In-place Processing algorithms (`native:truncatetable`, SQL execution, imports that overwrite tables) and file overwrites ran without approval or undo | Per-call risk: such calls are *destructive* (approval in Balanced mode, inputs snapshotted); Processing refuses existing outputs unless `overwrite=true` |
+| High | Tripwire bypasses: `os.replace`/`os.truncate`, threads, a Python subprocess, shell chaining | Both paths of renames and hard links checked; more path events confined; thread start blocked (audit event on 3.10+, wrapped primitive on 3.9, which has no such event); only single GIS binaries may be spawned |
+| Medium | Stop blocked the GUI on the HTTP reader's lock and ended the run as an error | Stop shuts the socket down; unstarted main-thread calls are abandoned; a worker still running at unload is kept alive |
+| Medium | Undo could revert an older run | Baseline taken at run start; every non-read tool marks the run as changed; undo removes only layers the run created |
+| Medium | Undo discarded the user's own unsaved edits | Edit buffers rewound to the undo-stack position at run start; data restored as a minimal diff that keeps feature ids |
+| Low | A retried stream duplicated text in the panel | The provider signals a reset; the panel drops the partial output |
+
+## 5. Verification
+
+- **Unit tests:** 103 tests, no QGIS, including a real local HTTP server that checks Stop interrupts a
+  silent stream at once. They cover provider payloads and stream parsing (Anthropic,
   OpenAI, Gemini, Ollama), agent-loop semantics, registry coercion, the code guard, scrubbing, pricing,
   Markdown, and scorer parity with all 30 upstream test vectors. They pass on Python 3.9 and 3.12.
-- **QGIS integration:** 45 tests: all 30 benchmark tasks via the oracle, negative scoring tests, tool
-  guards, the tripwire, undo, rendering and layouts, raster and vector styling, the GUI approval flow
+- **QGIS integration:** 53 tests: all 30 benchmark tasks via the oracle, negative scoring tests, tool
+  guards, every reported tripwire bypass, undo (including your own unsaved edits and destructive
+  Processing), rendering and layouts, raster and vector styling, the GUI approval and question flows
   (offscreen), encrypted key storage and the MCP server. They pass on QGIS 3.36 (macOS) and, in CI, on QGIS 3.44 LTR and
   QGIS 4.2 (Qt6).
 - **Real application:** the packaged ZIP loads in the QGIS 3.36 desktop app; the dock opens with all
@@ -71,7 +89,7 @@ The development of QGISSI 0.1.0 (21 October 2026), recorded in order.
 - **Benchmark pipelines** run end to end with a local model on GeoKTools and GeoExpertQueries, producing
   official-format predictions and traces.
 
-## 5. Open items
+## 6. Open items
 
 - Run the Claude model benchmarks (Opus 5.5 / Sonnet 5.5 / Haiku 5.5) once an API key is available, and
   publish the results in [BENCHMARKS.md](BENCHMARKS.md).

@@ -10,7 +10,11 @@ from .scoring import summarize
 
 
 def _money(value) -> str:
-    return "n/a" if value is None else f"${value:.4f}" if value < 1 else f"${value:.2f}"
+    if value is None:
+        return "n/a"
+    if value == 0:
+        return "$0"
+    return f"${value:.4f}" if value < 1 else f"${value:.2f}"
 
 
 def build_markdown(records: List[Dict[str, Any]], meta: Dict[str, Any]) -> str:

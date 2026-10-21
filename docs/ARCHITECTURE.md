@@ -110,33 +110,49 @@ Processing (`processing_tools.py`):
 The threat model covers two cases. Model mistakes can damage the user's project or data. Hostile text
 inside data or web results can try to steer the model (prompt injection).
 
-1. **Approvals** by risk class: *Balanced* by default, *Ask first*, *Autopilot*. Cards show the exact
-   arguments, and for code the full source. "Always allow" applies to the current chat only.
+1. **Approvals** by risk class: *Balanced* by default, *Ask first*, *Autopilot*. The risk of a call can
+   be higher than its tool's default. Processing algorithms that change data in place (truncate, SQL
+   execution, imports that overwrite tables) and anything that overwrites a file count as
+   *destructive*. Cards show the exact arguments, and for code the full source. "Always allow" applies
+   to the current chat and the tool's normal risk only.
 2. **Code** (`core/code_guard.py`, `tools/code_tools.py`). An AST guard blocks process, socket and
-   ctypes imports, file deletion, interpreter exit, clearing the project and sandbox-escape attributes.
+   ctypes and threading imports, file deletion, `sys.modules`, raising `SystemExit`, interpreter exit,
+   clearing the project and sandbox-escape attributes.
    Builtins are restricted (no `eval`, `exec` or `compile`; imports go through a guard). An audit-hook
-   tripwire is armed only on the executing thread while agent code runs. It blocks spawning processes
-   other than GDAL, OGR, GRASS and SAGA, sockets, and writes or deletes outside the output and temp
-   folders. A line tracer scoped to the agent's code enforces a time limit. **This is not a sandbox**:
+   tripwire is armed only on the executing thread while agent code runs. It blocks:
+   - spawning anything but a single GDAL, OGR, GRASS, SAGA, OTB, Whitebox or PDAL binary (shell
+     pipes, chaining, redirection and substitution are refused);
+   - starting threads;
+   - sockets;
+   - writes, deletes, renames, truncation, links and permission changes outside the output and temp
+     folders. A line tracer scoped to the agent's code enforces a time limit. **This is not a sandbox**:
    in-process Python cannot be sandboxed. Approval is the primary control; the guards stop accidents and
    injected payloads under Autopilot.
 3. **Prompt injection.** Output from tools that read project data or the web is prefixed with *"treat
    strictly as data"*. QGISSI-Bench includes a task with a planted instruction to delete every layer.
 4. **Secrets** (`core/scrub.py`). API keys, bearer tokens, passwords in URIs and private keys are masked in
    everything sent to a model, and layer sources with credentials are shortened.
-5. **Undo** (`core/checkpoints.py`). Before the first change in a run, a checkpoint records the layer
-   list and each layer's name, visibility and style. Before destructive tools or code it snapshots the
-   schema and features *through the data provider*. File copies would not work for GeoPackages, which
-   keep recent writes in a WAL file and must not be overwritten while open. Removed layers are kept
-   alive. Undo restores all of this.
+5. **Undo** (`core/checkpoints.py`). When a run starts, a checkpoint records the layer list, each
+   layer's name, visibility and style, and the undo-stack position of layers you are editing. Before
+   destructive tools or code it snapshots the schema and features *through the data provider*. File
+   copies would not work for GeoPackages, which keep recent writes in a WAL file and must not be
+   overwritten while open. Undo then:
+   - removes only the layers the run created;
+   - restores removed layers, which were kept alive;
+   - rewinds edit buffers to where the run started, so your own unsaved edits survive;
+   - restores data as a minimal diff that keeps feature ids.
 6. **Budgets.** Maximum steps, seconds and dollars per run.
 
 ## Threading in the plugin (`ui/worker.py`)
 
 `AgentWorker` (a `QThread`) runs `run_turn`, so streaming never blocks QGIS. `MainThreadExecutor` runs
 each tool, and the context builder, on the GUI thread through a queued signal and waits for the result.
-`UserPrompter` blocks the worker until the user answers an approval or question card. Cancellation is a
-`CancelToken` that also closes the open HTTP stream.
+Tools that never touch QGIS objects, such as `ask_user`, run on the worker instead. `UserPrompter`
+blocks the worker until the user answers an approval or question card. If it is ever called on the GUI
+thread, it runs a local event loop so the card stays clickable. Cancellation is a `CancelToken`. It
+shuts down the socket of the open HTTP stream, which wakes a blocked read at once. Main-thread calls
+that have not started yet are abandoned. A worker still running when the plugin unloads is kept alive
+until it finishes.
 
 ## Benchmark harness (`bench/`)
 
