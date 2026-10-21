@@ -22,3 +22,19 @@ def test_failing_answer_scores_zero(fixture_dir, tmp_path):
     target.provider.prepare = lambda task_id: type(target.provider).prepare(target.provider, "_wrong")
     record = run_task(task, target, BenchConfig(max_steps=3), fixture_dir, str(tmp_path / "wrong"))
     assert record["score"] == 0.0 and record["got"] == 999
+
+
+def test_correct_guess_without_tools_scores_zero(fixture_dir, tmp_path):
+    from qgis.core import QgsVectorLayer
+
+    from qgissi.bench.oracle import SCRIPTS
+    from qgissi.bench.runner import BenchConfig, make_target, run_task
+    from qgissi.bench.tasks import TASKS_BY_ID
+    layer = QgsVectorLayer(f"{fixture_dir}/musterstadt.gpkg|layername=buildings", "b", "ogr")
+    truth = sum(1 for f in layer.getFeatures() if f["type"] == "industrial")
+    SCRIPTS["_guess"] = [lambda r: f"ANSWER: {truth}"]
+    target = make_target("oracle")
+    target.provider.prepare = lambda task_id: type(target.provider).prepare(target.provider, "_guess")
+    record = run_task(TASKS_BY_ID["inspect_industrial_count"], target, BenchConfig(max_steps=3), fixture_dir,
+                      str(tmp_path / "guess"))
+    assert record["score"] == 0.0 and "not grounded" in record["detail"]

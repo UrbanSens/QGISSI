@@ -142,6 +142,9 @@ def run_task(task: Task, target: ModelTarget, cfg: BenchConfig, fixture_dir: str
     except Exception as exc:  # a checker crash must not abort the benchmark
         result = CheckResult(0.0, f"checker error: {type(exc).__name__}: {exc}")
         traceback.print_exc()
+    if task.grounded and result.score > 0 and not any(not c.is_error for c in run.tool_calls):
+        result = CheckResult(0.0, "not grounded: no successful tool call (a guessed answer scores 0)",
+                             result.expected, result.got)
     record = {
         "suite": "qgissi", "task": task.id, "category": task.category, "difficulty": task.difficulty,
         "model_spec": target.spec, "provider": target.provider_name, "model": target.model, "effort": target.effort,
