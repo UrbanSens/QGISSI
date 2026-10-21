@@ -75,8 +75,24 @@ def _init_processing() -> None:
 def stop_qgis() -> None:
     global _APP
     if _APP is not None:
+        from qgis.core import QgsProject
+        QgsProject.instance().clear()
         _APP.exitQgis()
         _APP = None
+
+
+def exit_process(code: int) -> None:
+    """Shut QGIS down and exit without Python's interpreter teardown.
+
+    Some PyQGIS builds (seen with QGIS 4.2) crash while Python destroys
+    module globals after the application has finished; all output is
+    flushed first and every file the harness writes is already closed.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if _APP is not None:
+        stop_qgis()
+    os._exit(code)
 
 
 def make_context(output_dir: Optional[str] = None, project=None):

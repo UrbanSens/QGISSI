@@ -215,4 +215,5 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from ..headless import exit_process
+    exit_process(main())
