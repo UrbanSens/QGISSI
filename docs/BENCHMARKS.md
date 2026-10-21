@@ -167,7 +167,38 @@ are not committed.
 ### Models
 
 <!-- RESULTS:START -->
-*Pending.* Claude runs need an `ANTHROPIC_API_KEY`; see the commands above.
+| Configuration | Score (95% CI) | Pass rate | Mean steps | Tool calls/task | Median time/task | Cost | Notes |
+|---|---|---|---|---|---|---|---|
+| ollama/mistral:latest (50 tools) | **0.067** (0.00–0.17) | 7% | 1.0 | 0.0 | 18s | $0 (local) | QGIS 3.36.3, tools: full |
+| ollama/mistral:latest (30 core tools) | **0.067** (0.00–0.17) | 7% | 1.0 | 0.0 | 17s | $0 (local) | QGIS 3.36.3, tools: core |
+
+| Configuration | crs | editing | inspection | layout | measurement | raster | safety | styling | vector | workflow |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ollama/mistral:latest (50 tools) | 0.33 | 0.00 | 0.25 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| ollama/mistral:latest (30 core tools) | 0.33 | 0.00 | 0.25 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+
+**Local baseline:** Ollama `mistral:latest` (7B) on an Apple M2 Pro with 16 GB, QGISSI-Bench run on
+2026-10-21.
+
+- Mistral did not issue a single native tool call in any of the 60 runs, with either the 50-tool or the
+  30-tool set. It answered from the project context alone, which is enough only for the two tasks that
+  context can answer.
+- The grounding rule scores its guesses on other tasks as 0. A run made before that rule existed
+  credited a lucky guess on `crs_wells_near_schools`.
+- Small local models without reliable tool calling are therefore not usable as QGIS agents. A
+  tool-capable local model of roughly 14B parameters or more, such as Qwen3, is needed. The 27B Qwen
+  model on the development machine does not fit in 16 GB of RAM.
+
+**Claude Opus 5.5, Sonnet 5.5 and Haiku 5.5 have not been run yet,** because no Anthropic API key was
+available during development. The Anthropic adapter's requests and response parsing are covered by unit
+tests written against the documented Messages API, but they have not yet been exercised against the live
+API. To run them, add `ANTHROPIC_API_KEY=...` to a `.env` file in the repository root (git-ignored), then:
+
+```bash
+scripts/qgis-python -m qgissi.bench run --models anthropic/claude-opus-5-5@medium,anthropic/claude-sonnet-5-5@medium,anthropic/claude-haiku-5-5@medium --repeats 3 --out bench_runs/claude
+```
+
+An interrupted run continues with `--resume`.
 <!-- RESULTS:END -->
 
 ### Cost guide
