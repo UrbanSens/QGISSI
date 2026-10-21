@@ -102,7 +102,7 @@ def _audit(event: str, args: Any) -> None:
         program = _program(args)
         if not program or not program.startswith(_ALLOWED_BINARIES):
             raise TripwireError(f"starting the process '{program or 'chained shell command'}' is not allowed")
-    elif event == "_thread.start_new_thread":
+    elif event.startswith("_thread.start"):  # start_new_thread (<= 3.12), start_joinable_thread (3.13+)
         raise TripwireError("starting threads is not allowed in agent code")
     elif event in ("os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty", "os.kill",
                    "ctypes.dlopen", "ctypes.dlsym", "ctypes.call_function", "socket.connect", "socket.bind",
