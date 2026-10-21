@@ -204,17 +204,22 @@ def _jsonable(value: Any) -> Any:
 
 
 def run_suite(tasks: List[Task], targets: List[ModelTarget], cfg: BenchConfig, out_dir: str, cache_dir: str,
-              progress: Callable[[str], None] = print) -> List[Dict[str, Any]]:
+              progress: Callable[[str], None] = print, resume: bool = False) -> List[Dict[str, Any]]:
     fixture_dir = build_fixture_dir(os.path.join(cache_dir, "fixtures"))
     os.makedirs(out_dir, exist_ok=True)
     results_path = os.path.join(out_dir, "results.jsonl")
-    records: List[Dict[str, Any]] = []
+    records: List[Dict[str, Any]] = load_records(out_dir) if resume and os.path.exists(results_path) else []
+    done = {(r["model_spec"], r["task"], r["repeat"]) for r in records}
+    if records:
+        progress(f"Resuming: {len(done)} run(s) already recorded in {results_path}")
     total = len(tasks) * len(targets) * cfg.repeats
     index = 0
     for target in targets:
         for repeat in range(cfg.repeats):
             for task in tasks:
                 index += 1
+                if (target.spec, task.id, repeat) in done:
+                    continue
                 work_dir = os.path.join(out_dir, "runs", target.slug, f"{task.id}_r{repeat}")
                 record = run_task(task, target, cfg, fixture_dir, work_dir, repeat)
                 records.append(record)

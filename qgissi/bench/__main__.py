@@ -130,8 +130,10 @@ def cmd_run(args) -> int:
                       network=args.network)
     targets = [make_target(spec, allow_fallback=args.allow_fallback) for spec in models]
     out_dir = _out_dir(args, "qgissi")
-    _write_meta(out_dir, args, "qgissi", len(tasks))
-    records = run_suite(tasks, targets, cfg, out_dir, args.cache)
+    if not (args.resume and os.path.exists(os.path.join(out_dir, "meta.json"))):
+        _write_meta(out_dir, args, "qgissi", len(tasks))
+    records = run_suite(tasks, targets, cfg, out_dir, args.cache, progress=lambda m: print(m, flush=True),
+                        resume=args.resume)
     paths = write_reports(out_dir, records)
     with open(paths["markdown"], encoding="utf-8") as fh:
         print(fh.read())
@@ -189,6 +191,8 @@ def main(argv=None) -> int:
     run.add_argument("--tasks", default="all", help="all | ids | cat:<category> | level:<n> (comma-separated)")
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--network", action="store_true", help="Allow network tools (off for reproducibility)")
+    run.add_argument("--resume", action="store_true",
+                     help="Continue an interrupted run in --out: skip model/task/repeat runs already recorded")
     run.set_defaults(func=cmd_run)
 
     report = sub.add_parser("report", help="Rebuild the reports of a run directory")
