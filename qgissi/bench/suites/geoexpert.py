@@ -20,7 +20,7 @@ PROMPTS = {"tool_agnostic": "tool_agnostic_autorater_prompt.txt", "workflow": "w
 
 def condense_trace(session, run, spec: str, limit_chars: int = 60000) -> str:
     from ... import __version__
-    lines = [f"[AGENT] QGISSI {__version__} | model={spec} | started={datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")} | "
+    lines = [f"[AGENT] QGISSI {__version__} | model={spec} | started={datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')} | "
              f"status={run.status} | steps={len(run.steps)}"]
     step = 0
     names: Dict[str, str] = {}

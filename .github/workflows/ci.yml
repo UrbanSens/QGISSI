@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install pytest
+      - name: Byte-compile every module (catches syntax that needs a newer Python)
+        run: python -m compileall -q qgissi tests scripts
       - run: python -m pytest tests/unit -q
 
   qgis:
