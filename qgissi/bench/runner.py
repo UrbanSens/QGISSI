@@ -16,7 +16,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from qgis.core import QgsCoordinateReferenceSystem, QgsProject, QgsRasterLayer, QgsVectorLayer
+from qgis.core import QgsCoordinateReferenceSystem, QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsVectorLayer
 
 from ..core.agent import AgentConfig, AgentSession
 from ..core.context import build_project_context
@@ -70,15 +70,45 @@ def make_target(spec: str, provider_factory: Optional[Callable[[str, str], Provi
     return ModelTarget(spec, provider_name, model, effort, provider)
 
 
-def load_fixture_project(project: QgsProject, data_dir: str) -> Dict[str, str]:
+_TEMPLATES: Dict[str, Dict[str, QgsVectorLayer]] = {}
+
+
+def _templates(template_dir: str) -> Dict[str, QgsVectorLayer]:
+    """Fixture layers read once per process into memory.
+
+    Opening a GeoPackage initialises SpatiaLite, whose SQLite warnings macOS's
+    system SQLite sends to the unified log; after a few hundred opens macOS
+    throttles the process. Each benchmark task therefore gets in-memory copies.
+    """
+    key = os.path.realpath(template_dir)
+    if key not in _TEMPLATES:
+        gpkg = os.path.join(key, "musterstadt.gpkg")
+        layers = {}
+        for name in LOAD_ORDER:
+            source = QgsVectorLayer(f"{gpkg}|layername={name}", name, "ogr")
+            if not source.isValid():
+                raise RuntimeError(f"Fixture layer {name} failed to load")
+            layers[name] = source.materialize(QgsFeatureRequest())
+        _TEMPLATES[key] = layers
+    return _TEMPLATES[key]
+
+
+def load_fixture_project(project: QgsProject, data_dir: str, template_dir: Optional[str] = None) -> Dict[str, str]:
+    """Load Musterstadt into the project: from ``data_dir``'s GeoPackage, or as fresh in-memory
+    copies of the layers in ``template_dir`` (used by the benchmark runner)."""
     project.clear()
     project.setCrs(QgsCoordinateReferenceSystem("EPSG:25832"))
     project.setTitle("Musterstadt")
     gpkg = os.path.join(data_dir, "musterstadt.gpkg")
+    templates = _templates(template_dir) if template_dir else None
     ids: Dict[str, str] = {}
     root = project.layerTreeRoot()
     for index, name in enumerate(LOAD_ORDER):  # top of the layer tree first
-        layer = QgsVectorLayer(f"{gpkg}|layername={name}", name, "ogr")
+        if templates is not None:
+            layer = templates[name].materialize(QgsFeatureRequest())
+            layer.setName(name)
+        else:
+            layer = QgsVectorLayer(f"{gpkg}|layername={name}", name, "ogr")
         if not layer.isValid():
             raise RuntimeError(f"Fixture layer {name} failed to load")
         project.addMapLayer(layer, False)
@@ -118,8 +148,9 @@ def run_task(task: Task, target: ModelTarget, cfg: BenchConfig, fixture_dir: str
     if os.path.isdir(work_dir):
         shutil.rmtree(work_dir)
     os.makedirs(output_dir)
-    shutil.copytree(fixture_dir, data_dir, ignore=shutil.ignore_patterns(".fixture_*"))
-    initial = load_fixture_project(project, data_dir)
+    os.makedirs(data_dir)
+    shutil.copy2(os.path.join(fixture_dir, "dem.tif"), data_dir)
+    initial = load_fixture_project(project, data_dir, template_dir=fixture_dir)
 
     def ctx_factory(cancel, run_id):
         return ToolContext(project=project, output_dir=output_dir, cancel=cancel, run_id=run_id, headless=True,

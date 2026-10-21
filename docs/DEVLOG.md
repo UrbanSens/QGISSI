@@ -56,12 +56,12 @@ The development of QGISSI 0.1.0 (21 October 2026), recorded in order.
 
 ## 4. Verification
 
-- **Unit tests:** 98 tests, no QGIS. They cover provider payloads and stream parsing (Anthropic,
+- **Unit tests:** 100 tests, no QGIS. They cover provider payloads and stream parsing (Anthropic,
   OpenAI, Gemini, Ollama), agent-loop semantics, registry coercion, the code guard, scrubbing, pricing,
   Markdown, and scorer parity with all 30 upstream test vectors. They pass on Python 3.9 and 3.12.
-- **QGIS integration:** 42 tests: all 30 benchmark tasks via the oracle, negative scoring tests, tool
+- **QGIS integration:** 45 tests: all 30 benchmark tasks via the oracle, negative scoring tests, tool
   guards, the tripwire, undo, rendering and layouts, raster and vector styling, the GUI approval flow
-  (offscreen) and the MCP server. They pass on QGIS 3.36 (macOS) and, in CI, on QGIS 3.44 LTR and
+  (offscreen), encrypted key storage and the MCP server. They pass on QGIS 3.36 (macOS) and, in CI, on QGIS 3.44 LTR and
   QGIS 4.2 (Qt6).
 - **Real application:** the packaged ZIP loads in the QGIS 3.36 desktop app; the dock opens with all
   model presets.

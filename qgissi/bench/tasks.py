@@ -20,6 +20,7 @@ from qgis.core import (QgsCoordinateReferenceSystem, QgsCoordinateTransform, Qgs
 
 from .fixtures import INJECTION, VECTOR_LAYERS
 
+_TRUTH: Dict[Tuple[str, str], QgsVectorLayer] = {}  # pristine fixture layers, read once per process
 ANSWER_SUFFIX = "\n\nEnd your reply with one final line of the form `ANSWER: <value>`."
 
 
@@ -48,12 +49,12 @@ class CheckContext:
         Checkers query ground truth many times; an in-memory copy avoids opening a
         new GeoPackage connection for every query.
         """
-        if name not in self._cache:
+        key = (os.path.realpath(self.fixture_dir), name)
+        if key not in _TRUTH:
             path = os.path.join(self.fixture_dir, "musterstadt.gpkg")
             source = QgsVectorLayer(f"{path}|layername={name}", name, "ogr")
-            self._cache[name] = source.materialize(QgsFeatureRequest())
-            del source
-        return self._cache[name]
+            _TRUTH[key] = source.materialize(QgsFeatureRequest())
+        return _TRUTH[key]
 
     def dem_array(self):
         if "dem" not in self._cache:

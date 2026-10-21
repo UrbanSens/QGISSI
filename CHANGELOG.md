@@ -19,4 +19,4 @@ First release.
 - **Benchmarks**: QGISSI-Bench (30 tasks, state-based checkers, oracle), adapters for Google's GeoKTools
   and GeoExpertQueries with a parity-tested scorer port and a configurable judge, Markdown and HTML
   reports.
-- **Quality**: 98 unit tests and 42 QGIS integration tests. CI runs on QGIS 3.44 LTR and QGIS 4.2 (Qt6).
+- **Quality**: 100 unit tests and 45 QGIS integration tests. CI runs on QGIS 3.44 LTR and QGIS 4.2 (Qt6).
