@@ -1,0 +1,1 @@
+"""QGISSI core package."""

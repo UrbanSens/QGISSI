@@ -101,6 +101,7 @@ class ChatDock(QDockWidget):
 
         self.transcript = QTextBrowser()
         self.transcript.setOpenLinks(False)
+        self.transcript.document().setDefaultStyleSheet("a { text-decoration: none; } code { font-family: monospace; }")
         self.transcript.anchorClicked.connect(self._anchor_clicked)
         layout.addWidget(self.transcript, 1)
 
