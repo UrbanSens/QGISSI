@@ -69,3 +69,16 @@ def test_render_and_layout_export(ctx):
     assert not call(ctx, "create_print_layout", name="L", title="Test").is_error
     exported = call(ctx, "export_print_layout", name="L", filename="l.pdf")
     assert exported.data["exists"]
+
+
+def test_raster_and_vector_styles(ctx):
+    for style in ("pseudocolor", "hillshade", "grayscale"):
+        result = call(ctx, "set_raster_style", layer="dem", style=style, color_ramp="Viridis")
+        assert not result.is_error, result.text
+    for args in (("set_single_symbol_style", {"layer": "parks", "color": "#2b8a3e", "outline_color": "black"}),
+                 ("set_graduated_style", {"layer": "districts", "field": "population", "classes": 4}),
+                 ("set_heatmap_style", {"layer": "trees"}),
+                 ("set_layer_opacity", {"layer": "dem", "opacity": 0.5}),
+                 ("set_labels", {"layer": "districts", "text": "\"name\" || ' ' || \"population\""})):
+        result = call(ctx, args[0], **args[1])
+        assert not result.is_error, (args[0], result.text)

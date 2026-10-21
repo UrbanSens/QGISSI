@@ -95,7 +95,7 @@ def render_image(ctx: ToolContext, width: int, height: int, extent: Optional[Qgs
 def png_base64(image: QImage) -> str:
     data = QByteArray()
     buffer = QBuffer(data)
-    buffer.open(QIODevice.WriteOnly)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     image.save(buffer, "PNG")
     buffer.close()
     return base64.b64encode(bytes(data)).decode("ascii")
